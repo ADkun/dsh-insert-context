@@ -29,9 +29,8 @@ const settingsPath = path.join(profile, 'insert-context.json')
 
 const { apply } = await import(pathToFileURL(path.join(here, '..', 'index.js')).href)
 
-const APPEND_TEXT = '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。'
-const DEFAULT_RULE_TEXT =
-  '【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】'
+const APPEND_TEXT = '[注：回复不复述过程，结构清晰可读性好。]'
+const DEFAULT_RULE_TEXT = '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！'
 const KIND = 'insert-context'
 const RULE_1_TEXT =
   '这是第 {{step}} 步。停一下：你这一轮结束会改变哪一条验收判定？写不出就现在收工交付。验证只做一层，重跑要说明想改变哪条判定；自评不算达标；返工上限 1 轮且只许点名补缺（缺哪条 + 缺什么证据）。'
@@ -180,21 +179,23 @@ console.log('rule model — hit steps, {{step}}, merge order')
     assert.deepEqual(fresh.body.configured.rules, DEFAULT_RULES)
     assert.deepEqual(fresh.body.rules, DEFAULT_RULES)
   })
-  check('the default rule text is bracketed 【 … 】 and stays within the length bound', () => {
+  check('the default rule text is the short step-10 nudge, verbatim', () => {
     const [rule] = fresh.body.rules
-    assert.ok(rule.text.startsWith('【'), `default rule text does not start with 【: ${rule.text.slice(0, 12)}`)
-    assert.ok(rule.text.endsWith('】'), `default rule text does not end with 】: ${rule.text.slice(-12)}`)
+    assert.equal(rule.text, DEFAULT_RULE_TEXT, 'the default rule text is the short step-10 nudge')
+    assert.equal(rule.text, '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！')
+    assert.ok(!rule.text.includes('【') && !rule.text.includes('】'), 'the default rule text carries no 【 】')
+    assert.ok(!rule.text.includes('压缩时'), 'the default rule text carries no compression sentence')
     assert.ok(rule.text.length <= 1000, `default rule text is ${rule.text.length} characters`)
-    assert.equal(rule.text, DEFAULT_RULE_TEXT, 'the default rule text is the shorter bracketed step notice')
   })
-  check('the default appendText is the delivery-shape sentence, verbatim', () => {
-    assert.equal(
-      APPEND_TEXT,
-      '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。',
-    )
+  check('the default appendText is the bracketed reply notice, verbatim', () => {
+    assert.equal(APPEND_TEXT, '[注：回复不复述过程，结构清晰可读性好。]')
     assert.equal(fresh.body.appendText, APPEND_TEXT)
     assert.equal(fresh.body.configured.appendText, APPEND_TEXT)
-    assert.equal(fresh.body.userAppend, true)
+  })
+  check('userAppend is off by default (only the every-10-steps injection is on)', () => {
+    assert.equal(fresh.body.userAppend, false)
+    assert.equal(fresh.body.configured.userAppend, false)
+    assert.deepEqual(fresh.body.stored, {}, 'no saved file, so the new default is what is live')
   })
 
   // Rule 1 alone: {start:5, every:5, repeat:9} → 5,10,15,20,25,30,35,40,45 — the
@@ -327,7 +328,7 @@ console.log('rule model — hit steps, {{step}}, merge order')
 
 console.log('append behaviour and the duplicate-suppression rule')
 {
-  const mounted = mount({ rules: [{ start: 2, every: 2, repeat: 3, text: 'RULE {{step}}' }] })
+  const mounted = mount({ rules: [{ start: 2, every: 2, repeat: 3, text: 'RULE {{step}}' }], userAppend: true })
   const original = userMessage()
   const decision = await step(mounted, { messages: [original] })
   check('the message keeps its own text, id and source, and gains a trailing block', () => {
@@ -362,7 +363,7 @@ console.log('append behaviour and the duplicate-suppression rule')
     assert.equal(mixed.messages[1].content.length, 2)
   })
 
-  const dup = mount({ rules: [{ start: 1, every: 1, repeat: 1, text: 'RULE {{step}}' }] })
+  const dup = mount({ rules: [{ start: 1, every: 1, repeat: 1, text: 'RULE {{step}}' }], userAppend: true })
   const dupDecision = await step(dup, { agentId: 'dup', messages: [userMessage()] })
   await checkAsync('a step that already appended to a user message does NOT also inject the rule', async () => {
     assert.equal(dupDecision.messages.length, 1, 'no extra message this step')
@@ -483,7 +484,7 @@ console.log('HTTP surface')
     assert.equal(cleared.status, 200)
     assert.deepEqual(cleared.body.stored, {})
     assert.deepEqual(cleared.body.rules, [{ start: 1, every: 1, repeat: 1, text: 'config {{step}}' }])
-    assert.equal(cleared.body.userAppend, true)
+    assert.equal(cleared.body.userAppend, false, 'the Config default is now off')
     assert.equal(cleared.body.appendText, 'config append')
     assert.deepEqual(stored(), {})
   })

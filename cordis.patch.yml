@@ -1,11 +1,12 @@
 # dsh-insert-context bundle layer.
-# Two behaviours: append a sentence to every user message (`userAppend`), and
-# inject a rule's text as its own context message on the steps the rule hits
-# (`rules`). A rule is {start, every, repeat, text}: it fires on
-# start, start+every, … start+(repeat-1)*every — or forever, on every `every`-th
+# Two behaviours: inject a rule's text as its own context message on the steps
+# the rule hits (`rules`), and optionally append a sentence to every user message
+# (`userAppend`, off by default). A rule is {start, every, repeat, text}: it fires
+# on start, start+every, … start+(repeat-1)*every — or forever, on every `every`-th
 # step from `start` on, when `repeat` is 0 (unlimited) — with `{{step}}` in the
 # text replaced by the current step number. The Settings page overrides both at
-# runtime; the values below are only the defaults.
+# runtime; the values below are only the defaults, read once when the plugin is
+# mounted (see README: changing them needs a restart + a new session).
 - insert:
     - id: insert-context
       name: dsh-insert-context
@@ -14,6 +15,6 @@
           - start: 10
             every: 10
             repeat: 0
-            text: '【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】'
-        userAppend: true
-        appendText: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。'
+            text: '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！'
+        userAppend: false
+        appendText: '[注：回复不复述过程，结构清晰可读性好。]'

@@ -6,13 +6,12 @@ import path from 'node:path'
 export const name = 'insert-context'
 
 /**
- * The default sentence appended to every user message (behaviour 1). It talks
- * about the shape of the delivery — is it up to the acceptance criteria, and is
- * the answer readable? — and deliberately not about "explore more": this host
- * has no turn budget, and telling the model to explore deeper measurably raises
- * reasoning tokens with no success gain.
+ * The default sentence appended to every user message (behaviour 1, off by
+ * default). Square brackets are part of the text: it marks the line as an
+ * aside about the shape of the answer — no process replay, readable structure —
+ * and deliberately says nothing about searching less or more.
  */
-const DEFAULT_APPEND_TEXT = '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。'
+const DEFAULT_APPEND_TEXT = '[注：回复不复述过程，结构清晰可读性好。]'
 
 /** Longest accepted rule text / append text, in UTF-16 code units. */
 const MAX_TEXT_LENGTH = 1000
@@ -34,8 +33,9 @@ const PREVIEW_HITS = 10
 /** Hard cap on how many hit steps `hitSteps()` will ever materialise (unlimited rules). */
 const MAX_HITS = 100000
 
-/** Behaviour 1 (append `appendText` to every user message) is on unless switched off. */
-const DEFAULT_USER_APPEND = true
+/** Behaviour 1 (append `appendText` to every user message) is off by default: the
+ * default delivery is just the per-step rule injection. */
+const DEFAULT_USER_APPEND = false
 
 /** Producer tag recorded on every injected message (unknown kinds fall through by contract). */
 const SOURCE_KIND = 'insert-context'
@@ -48,17 +48,17 @@ const MAX_BODY_BYTES = 64 * 1024
 /**
  * The one rule shipped as the built-in default: from step 10, every 10 steps,
  * unlimited (the user removed the second "wrap-up" rule from the defaults and
- * asked for an advisory tone — a suggestion, not an order). The default asks the
- * one question that decides whether to stop: is the acceptance checklist done?
- * Longer wordings the user has used survive in the README as examples only.
+ * asked for an advisory tone — a suggestion, not an order). The default is the
+ * short, playful nudge: ten steps in, say the step number and ask not to trade
+ * quality for speed. Older/longer wordings survive in the README as examples
+ * only (the bracketed notice, the long "wrap-up" text).
  */
 const DEFAULT_RULES = Object.freeze([
   Object.freeze({
     start: 10,
     every: 10,
     repeat: 0,
-    text:
-      '【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】',
+    text: '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！',
   }),
 ])
 

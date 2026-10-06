@@ -7,10 +7,11 @@ you define. Two independent behaviours, both configured from DSH's Settings page
    agent's current step number is one of the steps the rule hits, the text is injected as one extra
    context message. `{{step}}` in the text is replaced by the current step number.
 2. **Append to every user message** — one sentence is appended to the end of each user message you
-   send.
+   send. **Off by default**; turn it on in Settings if you want it.
 
 Either behaviour can be turned off (an empty rule list injects nothing; `userAppend: false` stops
-the append), and nothing is injected unless a rule or the append is actually configured.
+the append — the shipped default), and nothing is injected unless a rule or the append is actually
+configured.
 
 ## Rules
 
@@ -67,42 +68,44 @@ for that same step — the appended sentence already ends the batch, and a secon
 
 ## Defaults
 
-The built-in default `appendText` describes the shape of the delivery, not the depth of the search:
-the earlier "探索过程深度要深、广度要广" sentence pushed exploration, which points the other way from a
-convergence reminder, and on this host it raises reasoning tokens without a success gain. It also asks
-for a readable structure, so the answer is scannable without restating the process. The sentence says
-nothing that would discourage necessary evidence gathering.
-
-> 交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。
-
-The built-in default `rules` holds **exactly one rule** — advisory in tone (a suggestion, not an
-order), from step 10, every 10 steps, unlimited:
+The built-in default `rules` holds **exactly one rule** — playful in tone (a nudge, not an order),
+from step 10, every 10 steps, unlimited:
 
 | # | rule | text |
 |---|---|---|
-| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】` |
+| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！` |
 
-The default is deliberately **short**: it asks the one question that decides whether to stop — is the
-acceptance checklist done? — instead of spelling out the whole wrap-up procedure. This host has **no
-session-level turn budget or hard gate**, so the older wording's branch about "触及轮数或预算上限"
-could essentially never fire; and because the reminder is reread on every hit, a long coercive text
-costs tokens on each one while shaping the reply more than it helps. Longer variants the user has used
-are kept below as copy-paste examples.
+About that wording:
 
-The default text is wrapped in `【 … 】`, matching the style this channel's notices originally used,
-and its tail carries a **compression-time instruction**: `压缩时不保留本括号内的内容。`. The notice is
-a one-off nudge for that step, not a fact to deliver, so a context compaction need not copy it into a
-folded summary — leaving it there only spends tokens. This instruction only covers the bracketed
-reminder itself; it says nothing about dropping *unverified / not-covered* items from a delivery,
-which the rules above still require.
+- it is the **plain literal** the user asked for — no `【 … 】` brackets and no compression sentence;
+- the tone check holds: it contains none of 必须 / 不许 / 立刻;
+- it stays **short** on purpose. The reminder is reread on every hit, and this host has **no
+  session-level turn budget or hard gate**, so an older wording's branch about "触及轮数或预算上限"
+  could essentially never fire. Longer, more coercive texts cost tokens on every hit while shaping the
+  reply more than they help.
 
-The former second "wrap-up" rule and the longer step notice are **no longer defaults** — they are kept
-here as copy-paste examples only (paste one into a new row on the Settings page if you want it):
+The built-in default `appendText` is used only when you turn the append switch on: it asks for a
+readable answer without a replay of the process, and the square brackets are part of the text.
+
+> [注：回复不复述过程，结构清晰可读性好。]
+
+Both the append switch and the appended line are **off/absent by default** (`userAppend: false`): the
+shipped default is just the every-10-steps injection above.
+
+Older/longer wordings the user has used are **not defaults** — they are kept here as copy-paste
+examples only (paste one into a new row on the Settings page if you want it):
 
 | rule (example, not a default) | text |
 |---|---|
+| `{ start: 10, every: 10, repeat: 0 }` | `【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】` |
 | `{ start: 10, every: 10, repeat: 0 }` | `【这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。压缩时不保留本括号内的内容。】` |
 | `{ start: 60, every: 10, repeat: 5 }` | `这是第 {{step}} 步。按边界收尾：交付“已完成 / 未完成 / 未完成原因 / 下次继续的第一步”，状态标 budget-limited，不许用不完整的答案冒充完成。` |
+
+Two of those examples carry a **compression-time instruction** in their tail:
+`压缩时不保留本括号内的内容。` The notice is a one-off nudge for that step, not a fact to deliver, so
+a context compaction need not copy it into a folded summary — leaving it there only spends tokens.
+That instruction covers the bracketed reminder itself only; it says nothing about dropping
+*unverified / not-covered* items from a delivery, which the rules above still require.
 
 ## How it works
 
@@ -129,9 +132,9 @@ and are exactly what the model reads on that step.
           - start: 10
             every: 10
             repeat: 0
-            text: '【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】'
-        userAppend: true
-        appendText: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。'
+            text: '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！'
+        userAppend: false
+        appendText: '[注：回复不复述过程，结构清晰可读性好。]'
 ```
 
 | field | type | default | meaning |
@@ -141,8 +144,8 @@ and are exactly what the model reads on that step.
 | `rules[].every` | integer 1–1000 | `10` | the interval between hits |
 | `rules[].repeat` | integer 0–1000; **`0` = unlimited** | `0` (unlimited) | how many hits in total; after that the rule goes quiet. `0` never goes quiet |
 | `rules[].text` | non-empty string, ≤ 1000 characters | see *Defaults* | the injected text; `{{step}}` is filled in |
-| `userAppend` | boolean | `true` | append `appendText` to every user message |
-| `appendText` | non-empty string, ≤ 1000 characters | the sentence above | the appended sentence (`{{step}}` is **not** substituted here) |
+| `userAppend` | boolean | `false` (off) | append `appendText` to every user message |
+| `appendText` | non-empty string, ≤ 1000 characters | the sentence above (used only when the switch is on) | the appended sentence (`{{step}}` is **not** substituted here) |
 
 Every field is overridable at runtime from the Settings page, without editing this patch.
 The old `every` / `stepNotice` / `text` fields were replaced by `rules` / `appendText`; a saved
@@ -158,14 +161,14 @@ navigation — title **过程插入** / **Context insertion**, placed right afte
 Settings → 过程插入
   Rules
    1  start [ 10 ]  every [ 10 ]  repeat [ 0 ]
-      text [ 【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】 ]
+      text [ 现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！ ]
       将注入第 10,20,30,40,50,60,70,80,90,100,… 步（无限次）
    ( + Add rule )     ( − Remove this rule )
-  Append to every user message  [x]
-  The sentence  [ 交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。 ]
+  Append to every user message  [ ]      ← off by default
+  The sentence  "[注：回复不复述过程，结构清晰可读性好。]"   ← those brackets are part of the text
    {{step}} is only substituted in rule texts, not here.
    ( Save )  ( Restore plugin defaults )
-  In effect: 1 rule · append on
+  In effect: 1 rule · append off
 ```
 
 Each row shows a **live preview** of the steps it will hit — the first 10 hits plus the total:
@@ -207,15 +210,15 @@ silently in compositions without an HTTP carrier):
 | route | method | body | answer |
 |---|---|---|---|
 | `/api/insert-context/settings` | `GET` | — | the state (below) |
-| `/api/insert-context/settings` | `POST` | `{ "rules": [ … ], "userAppend": true, "appendText": "…" }` | the new state |
+| `/api/insert-context/settings` | `POST` | `{ "rules": [ … ], "userAppend": true, "appendText": "…" }` (any subset) | the new state |
 | `/api/insert-context/settings` | `DELETE` | — | drops the saved file, back to the Config defaults |
 
 ```jsonc
 {
   "ok": true,
-  "rules": [ { "start": 5, "every": 5, "repeat": 9, "text": "这是第 {{step}} 步。…" } ],  // live values
-  "userAppend": true,
-  "appendText": "交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。",
+  "rules": [ { "start": 10, "every": 10, "repeat": 0, "text": "现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！" } ],  // live values
+  "userAppend": false,
+  "appendText": "[注：回复不复述过程，结构清晰可读性好。]",
   "bounds": { "start": [1, 100000], "every": [1, 1000], "repeat": [0, 1000], "text": 1000 },
   "previewHits": 10,
   "configured": { … },                                   // from the patch (same shape as above)
@@ -239,20 +242,34 @@ service's own admission check when it is mounted).
 dsh plugin add D:\dsh\dsh-insert-context
 ```
 
-or from the plugin manager with the package directory as the target. The bundle patch
-`cordis.patch.yml` is applied automatically and the row is remounted live.
+or from the plugin manager with the package directory as the target.
 
-The running host hot-reloads the plugin module when a file changes on disk (verified: a new `text`
-took effect and a new HTTP route appeared mid-session), so a code change usually needs no restart —
-reload the page (F5) to pick up `client.js`, and restart DSH only if a change does not show up.
+### When a change takes effect
+
+The three sources are read at different moments — worth knowing before you edit a default:
+
+| you changed | read when | what it needs |
+|---|---|---|
+| a rule / the switch / the sentence on the **Settings page** (Save) | never re-read from disk: `POST` rewrites the live values in memory (`index.js:490-492`), and the next step already sees them | nothing — no restart, no patch edit |
+| `cordis.patch.yml` (the row's `config`) | **once, when the plugin row is mounted**: `apply(ctx, config)` copies `config.rules` / `config.userAppend` / `config.appendText` into a frozen `configured` object (`index.js:404-409`), and the `agent/pre-step` handler only reads those closure variables (`index.js:454`) | a **remount** — restart DSH (the host stacks and parses the patch layers during profile boot) |
+| the built-in defaults inside `index.js` (`DEFAULT_RULES`, `DEFAULT_APPEND_TEXT`, `DEFAULT_USER_APPEND`) | the same mount-time read, through `configured` | a remount / restart — *unless* the host hot-reloads the plugin module (it re-imports the module when a file changes on disk; observed mid-session: a new `text` took effect and a new HTTP route appeared) |
+
+There is **no per-step config read and no cache to invalidate**: the event handler looks at the closure
+variables once per step (`if (userAppend)`, `index.js:454`) and never at `ctx` config. So a running
+process keeps whatever it captured at mount, and the only way to change an already-mounted row without
+a restart is the Settings page.
+
+`client.js` is a browser half: reload the page (F5) after changing it. If a change does not show up
+even after the host hot-reloads the plugin file, restart DSH.
 
 ## Verify
 
 - Rules: the text appears as a user-role context message (source kind `insert-context`) on exactly
   the steps of the hit set — e.g. with the default, on the 10th, 20th, 30th … step of an agent
   (`repeat: 0` never stops), each carrying its own step number in `这是第 N 步。`.
-- Append: the sentence is the last paragraph of each message you send, in the transcript as well as
-  in the request.
+- Append (only when the switch is on): the sentence is the last paragraph of each message you send, in
+  the transcript as well as in the request. With the shipped default (`userAppend: false`) no message
+  carries it.
 - `GET /api/insert-context/settings` answers JSON with `content-type: application/json` — an
   unauthenticated probe still proves the route is registered (an unknown path answers a bare
   `401 unauthorized` with no JSON content type). The old `/api/convergence-notice/settings` no
