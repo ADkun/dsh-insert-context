@@ -67,16 +67,24 @@ for that same step — the appended sentence already ends the batch, and a secon
 
 ## Defaults
 
-The built-in default `appendText` is the sentence the plugin used to carry:
+The built-in default `appendText` describes the shape of the delivery, not the depth of the search:
+the earlier "探索过程深度要深、广度要广" sentence pushed exploration, which points the other way from a
+convergence reminder, and on this host it raises reasoning tokens without a success gain. The new
+sentence says nothing that would discourage necessary evidence gathering.
 
-> 【探索过程深度要深、广度要广，但最终回复简洁明了。】
+> 交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。
 
 The built-in default `rules` holds **exactly one rule** — advisory in tone (a suggestion, not an
 order), from step 10, every 10 steps, unlimited:
 
 | # | rule | text |
 |---|---|---|
-| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `这是第 {{step}} 步。按需收敛：这一轮结束后如果没有任何验收判定会改变，就可以收工交付当前结果；要继续时，先把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍；触及轮数或预算上限时，交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited。` |
+| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。` |
+
+Its fallback deliberately names *not finishing the turn* (interrupted / needs another round) instead
+of "hitting a turn or budget limit": this host has **no session-level turn budget or hard gate**, so
+the old "触及轮数或预算上限时" could essentially never fire, while a turn that did not wrap up is
+the situation that actually occurs.
 
 The former second "wrap-up" rule is **no longer a default** — it is kept here as a copy-paste
 example only (paste it into a new row on the Settings page if you want it):
@@ -112,7 +120,7 @@ and are exactly what the model reads on that step.
             repeat: 0
             text: '这是第 {{step}} 步。按需收敛：…'
         userAppend: true
-        appendText: '【探索过程深度要深、广度要广，但最终回复简洁明了。】'
+        appendText: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。'
 ```
 
 | field | type | default | meaning |
@@ -143,7 +151,7 @@ Settings → 过程插入
       将注入第 10,20,30,40,50,60,70,80,90,100,… 步（无限次）
    ( + Add rule )     ( − Remove this rule )
   Append to every user message  [x]
-  The sentence  [ 【探索过程深度要深、广度要广，但最终回复简洁明了。】 ]
+  The sentence  [ 交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。 ]
    {{step}} is only substituted in rule texts, not here.
    ( Save )  ( Restore plugin defaults )
   In effect: 1 rule · append on
@@ -196,7 +204,7 @@ silently in compositions without an HTTP carrier):
   "ok": true,
   "rules": [ { "start": 5, "every": 5, "repeat": 9, "text": "这是第 {{step}} 步。…" } ],  // live values
   "userAppend": true,
-  "appendText": "【探索过程深度要深、广度要广，但最终回复简洁明了。】",
+  "appendText": "交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。",
   "bounds": { "start": [1, 100000], "every": [1, 1000], "repeat": [1, 1000], "text": 1000 },
   "previewHits": 10,
   "configured": { … },                                   // from the patch (same shape as above)
