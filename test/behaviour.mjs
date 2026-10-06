@@ -41,7 +41,7 @@ const DEFAULT_RULES = [
     every: 10,
     repeat: 0,
     text:
-      '这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。',
+      '【这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。压缩时不保留本括号内的内容。】',
   },
 ]
 
@@ -178,6 +178,12 @@ console.log('rule model — hit steps, {{step}}, merge order')
   check('the built-in default is the single unlimited rule, verbatim', () => {
     assert.deepEqual(fresh.body.configured.rules, DEFAULT_RULES)
     assert.deepEqual(fresh.body.rules, DEFAULT_RULES)
+  })
+  check('the default rule text is bracketed 【 … 】 and stays within the length bound', () => {
+    const [rule] = fresh.body.rules
+    assert.ok(rule.text.startsWith('【'), `default rule text does not start with 【: ${rule.text.slice(0, 12)}`)
+    assert.ok(rule.text.endsWith('】'), `default rule text does not end with 】: ${rule.text.slice(-12)}`)
+    assert.ok(rule.text.length <= 1000, `default rule text is ${rule.text.length} characters`)
   })
   check('the default appendText is the delivery-shape sentence, verbatim', () => {
     assert.equal(APPEND_TEXT, '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。')

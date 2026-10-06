@@ -79,12 +79,19 @@ order), from step 10, every 10 steps, unlimited:
 
 | # | rule | text |
 |---|---|---|
-| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。` |
+| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `【这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。压缩时不保留本括号内的内容。】` |
 
 Its fallback deliberately names *not finishing the turn* (interrupted / needs another round) instead
 of "hitting a turn or budget limit": this host has **no session-level turn budget or hard gate**, so
 the old "触及轮数或预算上限时" could essentially never fire, while a turn that did not wrap up is
 the situation that actually occurs.
+
+The default text is wrapped in `【 … 】`, matching the style this channel's notices originally used,
+and its tail carries a **compression-time instruction**: `压缩时不保留本括号内的内容。`. The notice is
+a one-off nudge for that step, not a fact to deliver, so a context compaction need not copy it into a
+folded summary — leaving it there only spends tokens. This instruction only covers the bracketed
+reminder itself; it says nothing about dropping *unverified / not-covered* items from a delivery,
+which the rules above still require.
 
 The former second "wrap-up" rule is **no longer a default** — it is kept here as a copy-paste
 example only (paste it into a new row on the Settings page if you want it):
@@ -118,7 +125,7 @@ and are exactly what the model reads on that step.
           - start: 10
             every: 10
             repeat: 0
-            text: '这是第 {{step}} 步。按需收敛：…'
+            text: '【这是第 {{step}} 步。按需收敛：…】'
         userAppend: true
         appendText: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。'
 ```
@@ -147,7 +154,7 @@ navigation — title **过程插入** / **Context insertion**, placed right afte
 Settings → 过程插入
   Rules
    1  start [ 10 ]  every [ 10 ]  repeat [ 0 ]
-      text [ 这是第 {{step}} 步。按需收敛：… ]
+      text [ 【这是第 {{step}} 步。按需收敛：…】 ]
       将注入第 10,20,30,40,50,60,70,80,90,100,… 步（无限次）
    ( + Add rule )     ( − Remove this rule )
   Append to every user message  [x]
