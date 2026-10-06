@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Convergence notice",
-    "description": "Inject a convergence line every N steps (by default \"【规划用最少的轮次达成目标。】\") and append it to every user message; both behaviours switch on the Settings page, where the line itself is editable too."
+    "title": "Context insertion",
+    "description": "Insert configurable context into the agent's own context on chosen executed steps (from step X, every Y steps, Z times, with {{step}} replaced by the current step number) and optionally append a sentence to every user message; both are configured on the Settings page."
   }
 }

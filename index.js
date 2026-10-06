@@ -3,32 +3,60 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-export const name = 'convergence-notice'
+export const name = 'insert-context'
 
-/** The one-line notice. */
-const DEFAULT_TEXT =
-  '【规划用最少的轮次达成目标。】'
+/** The default sentence appended to every user message (behaviour 1). */
+const DEFAULT_APPEND_TEXT = '【探索过程深度要深、广度要广，但最终回复简洁明了。】'
 
-/** Longest accepted notice, in UTF-16 code units. */
+/** Longest accepted rule text / append text, in UTF-16 code units. */
 const MAX_TEXT_LENGTH = 1000
 
-const DEFAULT_EVERY = 5
+/** Rule field bounds. */
+const MIN_START = 1
+const MAX_START = 100000
 const MIN_EVERY = 1
 const MAX_EVERY = 1000
+const MIN_REPEAT = 0
+const MAX_REPEAT = 1000
 
-/** Behaviour 2 (inject one message every `every` steps) is on unless switched off. */
-const DEFAULT_STEP_NOTICE = true
+/** The only placeholder a rule text may carry: replaced with the agent's step number. */
+const STEP_TOKEN = '{{step}}'
 
-/** Behaviour 1 (append the notice to every user message) is on unless switched off. */
+/** How many hit steps the Settings page previews before it just prints the count. */
+const PREVIEW_HITS = 10
+
+/** Hard cap on how many hit steps `hitSteps()` will ever materialise (unlimited rules). */
+const MAX_HITS = 100000
+
+/** Behaviour 1 (append `appendText` to every user message) is on unless switched off. */
 const DEFAULT_USER_APPEND = true
 
 /** Producer tag recorded on every injected message (unknown kinds fall through by contract). */
-const SOURCE_KIND = 'convergence-notice'
+const SOURCE_KIND = 'insert-context'
 
 /** Same-origin route the Settings section reads and writes. */
-const ROUTE_PATH = '/api/convergence-notice'
+const ROUTE_PATH = '/api/insert-context'
 
 const MAX_BODY_BYTES = 64 * 1024
+
+/**
+ * The one rule shipped as the built-in default: from step 10, every 10 steps,
+ * unlimited (the user removed the second "wrap-up" rule from the defaults and
+ * asked for an advisory tone — a suggestion, not an order). The wrap-up text
+ * survives in the README as an example only.
+ */
+const DEFAULT_RULES = Object.freeze([
+  Object.freeze({
+    start: 10,
+    every: 10,
+    repeat: 0,
+    text:
+      '这是第 {{step}} 步。按需收敛：这一轮结束后如果没有任何验收判定会改变，就可以收工交付当前结果；要继续时，先把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍；触及轮数或预算上限时，交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited。',
+  }),
+])
+
+/** Every `{{…}}` a text carries, whatever is inside it. */
+const PLACEHOLDER_RE = /{{[\s\S]*?}}/g
 
 /** Freeze the message the way the harness's own immutable messages are frozen. */
 function deepFreeze(value) {
@@ -38,42 +66,80 @@ function deepFreeze(value) {
 }
 
 /**
- * Build a user-role context message shaped exactly like the harness's own
- * injected context (id + role + text content block + producer source).
+ * The unknown placeholders a text carries: `{{step}}` is the one supported
+ * token, anything else is left in the text verbatim and reported, never
+ * silently swallowed.
+ *
+ * @returns {string[]} the placeholders to complain about, in order of appearance.
  */
-function createNoticeMessage(text) {
-  return deepFreeze({
-    id: randomUUID(),
-    role: 'user',
-    content: [{ type: 'text', text }],
-    source: { kind: SOURCE_KIND },
-  })
+function unknownPlaceholders(text) {
+  if (typeof text !== 'string') return []
+  const found = text.match(PLACEHOLDER_RE) ?? []
+  return found.filter((token) => token !== STEP_TOKEN)
+}
+
+/** Report every unknown placeholder of a text once. */
+function warnUnknownPlaceholders(text, logger, where) {
+  for (const token of unknownPlaceholders(text)) {
+    logger?.warn?.(
+      `insert-context: unknown placeholder ${token} in ${where}; it is injected verbatim (only ${STEP_TOKEN} is supported)`,
+    )
+  }
 }
 
 /**
- * Did a person write this message? The harness tags every submitted prompt
- * (`agent.prompt` from the web UI, the CLI, ACP or an SDK) with
- * `source: { kind: 'user', rpcId, ... }`, while the loop's own context messages,
- * this plugin's notices and subagent steering all use their own kinds.
+ * Rule text with `{{step}}` replaced by the current step number. Only the exact
+ * literal `{{step}}` is a placeholder; unknown `{{…}}` tokens pass through.
  */
-function isUserMessage(message) {
-  return message?.source?.kind === 'user'
+function fillStep(text, count) {
+  return String(text).split(STEP_TOKEN).join(String(count))
 }
 
 /**
- * Copy of one user message with the notice as a final text block. Content blocks
- * are never merged: the text the user wrote stays byte-for-byte in the log, and
- * the notice is its own trailing paragraph.
+ * The steps one rule fires on: `start`, `start+every`, … — exactly `repeat`
+ * entries, or an endless run when `repeat` is 0 (unlimited). The walk is capped
+ * at `limit` entries so a preview of an unlimited rule cannot loop forever.
+ * `{start:5, every:5, repeat:9}` → 5,10,15,20,25,30,35,40,45.
+ * Exported so the test can prove an unlimited rule produces a finite list.
  */
-function withNotice(message, text) {
-  const content = Array.isArray(message?.content) ? message.content : []
-  return deepFreeze({ ...message, content: [...content, { type: 'text', text }] })
+export function hitSteps(rule, limit = MAX_HITS) {
+  const capped = rule.repeat === 0 ? Math.max(0, limit) : Math.min(rule.repeat, Math.max(0, limit))
+  const steps = []
+  for (let index = 0; index < capped; index += 1) {
+    steps.push(rule.start + index * rule.every)
+  }
+  return steps
 }
 
-/** An accepted interval, or `undefined` when the value is not one. */
+/** Does this rule fire on this executed step? (Its hit set is `start + k·every`; `repeat: 0` = unlimited.) */
+function ruleHits(rule, count) {
+  if (count < rule.start) return false
+  if (!Number.isInteger((count - rule.start) / rule.every)) return false
+  if (rule.repeat === 0) return true
+  return (count - rule.start) / rule.every < rule.repeat
+}
+
+/** Is a coerced number an integer inside `[min, max]`? */
+function inRange(value, min, max) {
+  return Number.isInteger(value) && value >= min && value <= max
+}
+
+/** An accepted `start`, or `undefined`. */
+function validStart(value) {
+  const number = Number(value)
+  return inRange(number, MIN_START, MAX_START) ? number : undefined
+}
+
+/** An accepted `every`, or `undefined`. */
 function validEvery(value) {
   const number = Number(value)
-  return Number.isInteger(number) && number >= MIN_EVERY && number <= MAX_EVERY ? number : undefined
+  return inRange(number, MIN_EVERY, MAX_EVERY) ? number : undefined
+}
+
+/** An accepted `repeat`, or `undefined`. */
+function validRepeat(value) {
+  const number = Number(value)
+  return inRange(number, MIN_REPEAT, MAX_REPEAT) ? number : undefined
 }
 
 /** An accepted switch value (a real boolean, or its string form), or `undefined`. */
@@ -84,11 +150,68 @@ function validFlag(value) {
   return undefined
 }
 
-/** An accepted notice, returned as written, or `undefined` when the value is not one. */
+/** An accepted text, returned as written, or `undefined` when the value is not one. */
 function validText(value) {
   if (typeof value !== 'string') return undefined
   if (value.trim().length === 0) return undefined
   return value.length <= MAX_TEXT_LENGTH ? value : undefined
+}
+
+/**
+ * A rule with every field coerced and checked, or a `{field, message}` refusal.
+ * The first bad field wins, so the Settings page can show one clear sentence.
+ */
+function validRule(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { error: { field: 'rule', message: 'a rule must be an object with start, every, repeat and text' } }
+  }
+  const start = validStart(raw.start)
+  if (start === undefined) {
+    return { error: { field: 'start', message: `start must be an integer between ${MIN_START} and ${MAX_START}` } }
+  }
+  const every = validEvery(raw.every)
+  if (every === undefined) {
+    return { error: { field: 'every', message: `every must be an integer between ${MIN_EVERY} and ${MAX_EVERY}` } }
+  }
+  const repeat = validRepeat(raw.repeat)
+  if (repeat === undefined) {
+    return { error: { field: 'repeat', message: `repeat must be an integer between ${MIN_REPEAT} and ${MAX_REPEAT} (0 = unlimited)` } }
+  }
+  const text = validText(raw.text)
+  if (text === undefined) {
+    return { error: { field: 'text', message: `text must be a non-empty string of at most ${MAX_TEXT_LENGTH} characters` } }
+  }
+  return { rule: { start, every, repeat, text } }
+}
+
+/**
+ * An accepted rule list. Every row is checked (not just the first one that
+ * fails) so the caller can report all of them; `rules` may be empty, which
+ * means "inject nothing".
+ */
+function validRules(value) {
+  if (!Array.isArray(value)) return { error: { message: 'rules must be an array of rules' } }
+  const rules = []
+  const errors = []
+  for (const row of value) {
+    const checked = validRule(row)
+    if (checked.error) {
+      errors.push({ index: rules.length, ...checked.error })
+      return { error: errors[0], errors }
+    }
+    rules.push(checked.rule)
+  }
+  return { rules }
+}
+
+/** The rules to use when the caller supplied none at all. */
+function defaultRules() {
+  return DEFAULT_RULES.map((rule) => ({ ...rule }))
+}
+
+/** Is one configured rule list usable as a whole? */
+function usableRules(rules) {
+  return Array.isArray(rules) && rules.every((rule) => validRule(rule).rule !== undefined)
 }
 
 /**
@@ -100,27 +223,45 @@ function settingsFile() {
     process.env.DSH_PROFILE_DIR ||
     process.env.DSH_HOME ||
     path.join(os.homedir(), '.dsh')
-  return path.join(base, 'convergence-notice.json')
+  return path.join(base, 'insert-context.json')
 }
 
-/** The fields this plugin persists, keeping only values that pass validation. */
-function normalizeSettings(raw) {
+/**
+ * The fields this plugin persists, keeping only values that pass validation.
+ * Bad rows are dropped rather than poisoning the whole file, so one hand-edited
+ * typo cannot silently disable every rule.
+ */
+function normalizeSettings(raw, logger) {
   const settings = {}
-  const every = validEvery(raw?.every)
-  if (every !== undefined) settings.every = every
-  const stepNotice = validFlag(raw?.stepNotice)
-  if (stepNotice !== undefined) settings.stepNotice = stepNotice
+  if (Array.isArray(raw?.rules)) {
+    const rules = []
+    for (const row of raw.rules) {
+      const checked = validRule(row)
+      if (checked.rule === undefined) {
+        logger?.warn?.(`insert-context: dropping an unusable saved rule (${checked.error.message})`)
+        continue
+      }
+      warnUnknownPlaceholders(checked.rule.text, logger, 'a saved rule')
+      rules.push(checked.rule)
+    }
+    settings.rules = rules
+  } else if (raw !== undefined && raw !== null && 'rules' in raw) {
+    logger?.warn?.('insert-context: dropping a saved rules value that is not an array')
+  }
   const userAppend = validFlag(raw?.userAppend)
   if (userAppend !== undefined) settings.userAppend = userAppend
-  const text = validText(raw?.text)
-  if (text !== undefined) settings.text = text
+  const appendText = validText(raw?.appendText)
+  if (appendText !== undefined) {
+    warnUnknownPlaceholders(appendText, logger, 'appendText')
+    settings.appendText = appendText
+  }
   return settings
 }
 
 /** Read the saved choices; an absent or unreadable file simply means "none". */
-function readStored(file) {
+function readStored(file, logger) {
   try {
-    return normalizeSettings(JSON.parse(fs.readFileSync(file, 'utf8')))
+    return normalizeSettings(JSON.parse(fs.readFileSync(file, 'utf8')), logger)
   } catch {
     return {}
   }
@@ -221,39 +362,74 @@ function readJson(req) {
   })
 }
 
+/** Build a user-role context message shaped like the harness's own injected context. */
+function createNoticeMessage(text) {
+  return deepFreeze({
+    id: randomUUID(),
+    role: 'user',
+    content: [{ type: 'text', text }],
+    source: { kind: SOURCE_KIND },
+  })
+}
+
+/**
+ * Did a person write this message? The harness tags every submitted prompt
+ * (`agent.prompt` from the web UI, the CLI, ACP or an SDK) with
+ * `source: { kind: 'user', rpcId, ... }`, while the loop's own context messages,
+ * this plugin's injections and subagent steering all use their own kinds.
+ */
+function isUserMessage(message) {
+  return message?.source?.kind === 'user'
+}
+
+/**
+ * Copy of one user message with the append text as a final text block. Content
+ * blocks are never merged: the text the user wrote stays byte-for-byte in the
+ * log, and the appended text is its own trailing paragraph.
+ */
+function withNotice(message, text) {
+  const content = Array.isArray(message?.content) ? message.content : []
+  return deepFreeze({ ...message, content: [...content, { type: 'text', text }] })
+}
+
 export function apply(ctx, config = {}) {
   /** Defaults from the plugin row's Config; the Settings page overrides them. */
+  const configuredRules = usableRules(config.rules) ? config.rules.map((rule) => validRule(rule).rule) : defaultRules()
   const configured = Object.freeze({
-    every: validEvery(config.every) ?? DEFAULT_EVERY,
-    stepNotice: validFlag(config.stepNotice) ?? DEFAULT_STEP_NOTICE,
+    rules: configuredRules,
     userAppend: validFlag(config.userAppend) ?? DEFAULT_USER_APPEND,
-    text: validText(config.text) ?? DEFAULT_TEXT,
+    appendText: validText(config.appendText) ?? DEFAULT_APPEND_TEXT,
   })
+  for (const rule of configuredRules) warnUnknownPlaceholders(rule.text, ctx.logger, 'a configured rule')
+  warnUnknownPlaceholders(configured.appendText, ctx.logger, 'the configured appendText')
 
   const file = settingsFile()
 
   /** What the Settings page saved; empty until it saves something. */
-  let stored = readStored(file)
+  let stored = readStored(file, ctx.logger)
 
   /** Live behaviour: the saved choice when there is one, else the row's Config. */
-  let every = stored.every ?? configured.every
-  let stepNotice = stored.stepNotice ?? configured.stepNotice
+  let rules = Array.isArray(stored.rules) ? stored.rules : configured.rules
   let userAppend = stored.userAppend ?? configured.userAppend
-  let text = stored.text ?? configured.text
+  let appendText = stored.appendText ?? configured.appendText
 
   /** Per-agent step counter, keyed by agent id. */
   const steps = new Map()
 
   const describe = () => ({
     ok: true,
-    every,
-    stepNotice,
+    rules,
     userAppend,
-    min: MIN_EVERY,
-    max: MAX_EVERY,
-    configured: { ...configured },
+    appendText,
+    bounds: {
+      start: [MIN_START, MAX_START],
+      every: [MIN_EVERY, MAX_EVERY],
+      repeat: [MIN_REPEAT, MAX_REPEAT],
+      text: MAX_TEXT_LENGTH,
+    },
+    previewHits: PREVIEW_HITS,
+    configured: { ...configured, rules: configured.rules.map((rule) => ({ ...rule })) },
     stored: { ...stored },
-    text,
     file,
   })
 
@@ -263,7 +439,7 @@ export function apply(ctx, config = {}) {
 
     const claimed = decision.messages
 
-    // Behaviour 1 — the notice trails every prompt the user just sent. The
+    // Behaviour 1 — the append text trails every prompt the user just sent. The
     // decision's messages are the ones this step journals, so the appended copy
     // is what the model reads *and* what the session log keeps.
     let messages = claimed
@@ -276,7 +452,7 @@ export function apply(ctx, config = {}) {
         }
       }
       if (appended) {
-        messages = claimed.map((message) => (isUserMessage(message) ? withNotice(message, text) : message))
+        messages = claimed.map((message) => (isUserMessage(message) ? withNotice(message, appendText) : message))
       }
     }
 
@@ -284,11 +460,14 @@ export function apply(ctx, config = {}) {
     const count = (steps.get(agentId) ?? 0) + 1
     steps.set(agentId, count)
 
-    // Behaviour 2 — one extra context message every `every` steps. A step that
-    // just appended the notice to a user message already ends with the sentence,
-    // so a second identical copy would only be noise.
-    if (stepNotice && count % every === 0 && !appended) {
-      ctx.logger?.debug?.(`convergence-notice: injected into step ${count} of turn ${payload.turn}`)
+    // Behaviour 2 — every rule whose hit set contains this step contributes one
+    // paragraph. The hits are merged into a single injected message, in the
+    // order the rules are listed, so a step that trips several rules still adds
+    // one message rather than several.
+    const hits = rules.filter((rule) => ruleHits(rule, count))
+    if (hits.length > 0 && !appended) {
+      const text = hits.map((rule) => fillStep(rule.text, count)).join('\n')
+      ctx.logger?.debug?.(`insert-context: injected into step ${count} of turn ${payload.turn} (${hits.length} rule(s))`)
       return { ...decision, messages: [...messages, createNoticeMessage(text)] }
     }
 
@@ -301,10 +480,9 @@ export function apply(ctx, config = {}) {
 
   const applySettings = (next) => {
     stored = next
-    every = next.every ?? configured.every
-    stepNotice = next.stepNotice ?? configured.stepNotice
+    rules = Array.isArray(next.rules) ? next.rules : configured.rules
     userAppend = next.userAppend ?? configured.userAppend
-    text = next.text ?? configured.text
+    appendText = next.appendText ?? configured.appendText
   }
 
   // The Settings section's data source. `webServer` is asked for, not injected:
@@ -339,11 +517,11 @@ export function apply(ctx, config = {}) {
               try {
                 fs.rmSync(file, { force: true })
               } catch (error) {
-                ctx.logger?.warn?.(`convergence-notice: could not clear the settings (${error?.message ?? error})`)
+                ctx.logger?.warn?.(`insert-context: could not clear the settings (${error?.message ?? error})`)
                 return send(500, { error: `could not clear: ${error?.message ?? error}` })
               }
               applySettings({})
-              ctx.logger?.info?.('convergence-notice: settings cleared, back to the plugin Config')
+              ctx.logger?.info?.('insert-context: settings cleared, back to the plugin Config')
               return send(200, describe())
             }
             if (method !== 'POST') return send(405, { error: 'method not allowed' })
@@ -354,25 +532,38 @@ export function apply(ctx, config = {}) {
             let touched = false
             const body = patch && typeof patch === 'object' ? patch : {}
 
-            if ('every' in body) {
+            if ('rules' in body) {
               touched = true
-              const value = validEvery(body.every)
-              if (value === undefined) error = `every must be an integer between ${MIN_EVERY} and ${MAX_EVERY}`
-              else next.every = value
+              // `null` / `[]` are the documented way to say "inject nothing".
+              if (body.rules === null) {
+                next.rules = []
+              } else {
+                const checked = validRules(body.rules)
+                if (checked.error) {
+                  error = checked.error.index === undefined
+                    ? checked.error.message
+                    : `rules[${checked.error.index}]: ${checked.error.message}`
+                } else {
+                  next.rules = checked.rules
+                  for (const rule of checked.rules) warnUnknownPlaceholders(rule.text, ctx.logger, 'a saved rule')
+                }
+              }
             }
-            for (const key of ['stepNotice', 'userAppend']) {
-              if (!(key in body)) continue
+            if ('userAppend' in body) {
               touched = true
-              const value = validFlag(body[key])
-              if (value === undefined) error = `${key} must be true or false`
-              else next[key] = value
+              const value = validFlag(body.userAppend)
+              if (value === undefined) error = 'userAppend must be true or false'
+              else next.userAppend = value
             }
-            if ('text' in body) {
+            if ('appendText' in body) {
               touched = true
-              const value = validText(body.text)
+              const value = validText(body.appendText)
               if (value === undefined) {
-                error = `text must be a non-empty string of at most ${MAX_TEXT_LENGTH} characters`
-              } else next.text = value
+                error = `appendText must be a non-empty string of at most ${MAX_TEXT_LENGTH} characters`
+              } else {
+                next.appendText = value
+                warnUnknownPlaceholders(value, ctx.logger, 'appendText')
+              }
             }
 
             if (error === undefined && !touched) error = 'no settings provided'
@@ -381,17 +572,17 @@ export function apply(ctx, config = {}) {
             try {
               writeStored(file, next)
             } catch (failure) {
-              ctx.logger?.warn?.(`convergence-notice: could not save the settings (${failure?.message ?? failure})`)
+              ctx.logger?.warn?.(`insert-context: could not save the settings (${failure?.message ?? failure})`)
               return send(500, { error: `could not save: ${failure?.message ?? failure}` })
             }
             applySettings(next)
             ctx.logger?.info?.(
-              `convergence-notice: every ${every} step(s), step notice ${stepNotice ? 'on' : 'off'}, user-message append ${userAppend ? 'on' : 'off'}, notice of ${text.length} character(s)`,
+              `insert-context: ${rules.length} rule(s), user-message append ${userAppend ? 'on' : 'off'}, append text of ${appendText.length} character(s)`,
             )
             return send(200, describe())
           },
         }),
-      'convergence-notice: settings api',
+      'insert-context: settings api',
     )
   })
 }

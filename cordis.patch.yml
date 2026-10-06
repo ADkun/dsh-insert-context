@@ -1,12 +1,19 @@
-# dsh-convergence-notice bundle layer.
-# Two switchable behaviours: append the notice to every user message
-# (`userAppend`), and inject it as its own message every `every` steps
-# (`stepNotice`). The Settings page overrides both at runtime.
+# dsh-insert-context bundle layer.
+# Two behaviours: append a sentence to every user message (`userAppend`), and
+# inject a rule's text as its own context message on the steps the rule hits
+# (`rules`). A rule is {start, every, repeat, text}: it fires on
+# start, start+every, … start+(repeat-1)*every — or forever, on every `every`-th
+# step from `start` on, when `repeat` is 0 (unlimited) — with `{{step}}` in the
+# text replaced by the current step number. The Settings page overrides both at
+# runtime; the values below are only the defaults.
 - insert:
-    - id: convergence-notice
-      name: dsh-convergence-notice
+    - id: insert-context
+      name: dsh-insert-context
       config:
-        every: 5
-        stepNotice: true
+        rules:
+          - start: 10
+            every: 10
+            repeat: 0
+            text: '这是第 {{step}} 步。按需收敛：这一轮结束后如果没有任何验收判定会改变，就可以收工交付当前结果；要继续时，先把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍；触及轮数或预算上限时，交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited。'
         userAppend: true
-        text: '【规划用最少的轮次达成目标。】'
+        appendText: '【探索过程深度要深、广度要广，但最终回复简洁明了。】'
