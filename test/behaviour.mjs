@@ -29,7 +29,9 @@ const settingsPath = path.join(profile, 'insert-context.json')
 
 const { apply } = await import(pathToFileURL(path.join(here, '..', 'index.js')).href)
 
-const APPEND_TEXT = '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。'
+const APPEND_TEXT = '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。'
+const DEFAULT_RULE_TEXT =
+  '【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】'
 const KIND = 'insert-context'
 const RULE_1_TEXT =
   '这是第 {{step}} 步。停一下：你这一轮结束会改变哪一条验收判定？写不出就现在收工交付。验证只做一层，重跑要说明想改变哪条判定；自评不算达标；返工上限 1 轮且只许点名补缺（缺哪条 + 缺什么证据）。'
@@ -40,8 +42,7 @@ const DEFAULT_RULES = [
     start: 10,
     every: 10,
     repeat: 0,
-    text:
-      '【这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。压缩时不保留本括号内的内容。】',
+    text: DEFAULT_RULE_TEXT,
   },
 ]
 
@@ -184,9 +185,13 @@ console.log('rule model — hit steps, {{step}}, merge order')
     assert.ok(rule.text.startsWith('【'), `default rule text does not start with 【: ${rule.text.slice(0, 12)}`)
     assert.ok(rule.text.endsWith('】'), `default rule text does not end with 】: ${rule.text.slice(-12)}`)
     assert.ok(rule.text.length <= 1000, `default rule text is ${rule.text.length} characters`)
+    assert.equal(rule.text, DEFAULT_RULE_TEXT, 'the default rule text is the shorter bracketed step notice')
   })
   check('the default appendText is the delivery-shape sentence, verbatim', () => {
-    assert.equal(APPEND_TEXT, '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。')
+    assert.equal(
+      APPEND_TEXT,
+      '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。',
+    )
     assert.equal(fresh.body.appendText, APPEND_TEXT)
     assert.equal(fresh.body.configured.appendText, APPEND_TEXT)
     assert.equal(fresh.body.userAppend, true)

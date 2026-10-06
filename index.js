@@ -7,12 +7,12 @@ export const name = 'insert-context'
 
 /**
  * The default sentence appended to every user message (behaviour 1). It talks
- * about the shape of the delivery — is it up to the acceptance criteria? — and
- * deliberately not about "explore more": this host has no turn budget, and
- * telling the model to explore deeper measurably raises reasoning tokens with
- * no success gain.
+ * about the shape of the delivery — is it up to the acceptance criteria, and is
+ * the answer readable? — and deliberately not about "explore more": this host
+ * has no turn budget, and telling the model to explore deeper measurably raises
+ * reasoning tokens with no success gain.
  */
-const DEFAULT_APPEND_TEXT = '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。'
+const DEFAULT_APPEND_TEXT = '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。'
 
 /** Longest accepted rule text / append text, in UTF-16 code units. */
 const MAX_TEXT_LENGTH = 1000
@@ -48,10 +48,9 @@ const MAX_BODY_BYTES = 64 * 1024
 /**
  * The one rule shipped as the built-in default: from step 10, every 10 steps,
  * unlimited (the user removed the second "wrap-up" rule from the defaults and
- * asked for an advisory tone — a suggestion, not an order). Its fallback names
- * the trigger that actually happens on this host: a turn that did not finish
- * (interrupted / still needs another round), because there is no turn or budget
- * gate to hit. The former wrap-up text survives in the README as an example only.
+ * asked for an advisory tone — a suggestion, not an order). The default asks the
+ * one question that decides whether to stop: is the acceptance checklist done?
+ * Longer wordings the user has used survive in the README as examples only.
  */
 const DEFAULT_RULES = Object.freeze([
   Object.freeze({
@@ -59,7 +58,7 @@ const DEFAULT_RULES = Object.freeze([
     every: 10,
     repeat: 0,
     text:
-      '【这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。压缩时不保留本括号内的内容。】',
+      '【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】',
   }),
 ])
 

@@ -68,7 +68,7 @@ window.__ModuleLoader__.load({
         append: '追加到每条用户消息',
         appendHint: '开关与文案独立于规则列表：开启后每条你发的消息末尾都会追加下面这句；{{step}} 只在规则文案里生效，这句里会原样输出。',
         appendLabel: '追加文案',
-        appendPlaceholder: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。',
+        appendPlaceholder: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。',
         appendInvalid: '追加文案不能为空，且最多 1000 个字符',
         current: '当前生效',
         sep: '：',
@@ -121,7 +121,7 @@ window.__ModuleLoader__.load({
         appendHint:
           'This switch and its text are independent of the rules: when on, every message you send carries the line below. {{step}} only works inside rule texts — here it is printed verbatim.',
         appendLabel: 'Appended line',
-        appendPlaceholder: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。',
+        appendPlaceholder: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。',
         appendInvalid: 'The appended line cannot be empty and takes at most 1000 characters',
         current: 'In effect',
         sep: ': ',

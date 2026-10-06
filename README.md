@@ -69,22 +69,25 @@ for that same step — the appended sentence already ends the batch, and a secon
 
 The built-in default `appendText` describes the shape of the delivery, not the depth of the search:
 the earlier "探索过程深度要深、广度要广" sentence pushed exploration, which points the other way from a
-convergence reminder, and on this host it raises reasoning tokens without a success gain. The new
-sentence says nothing that would discourage necessary evidence gathering.
+convergence reminder, and on this host it raises reasoning tokens without a success gain. It also asks
+for a readable structure, so the answer is scannable without restating the process. The sentence says
+nothing that would discourage necessary evidence gathering.
 
-> 交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。
+> 交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。
 
 The built-in default `rules` holds **exactly one rule** — advisory in tone (a suggestion, not an
 order), from step 10, every 10 steps, unlimited:
 
 | # | rule | text |
 |---|---|---|
-| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `【这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。压缩时不保留本括号内的内容。】` |
+| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】` |
 
-Its fallback deliberately names *not finishing the turn* (interrupted / needs another round) instead
-of "hitting a turn or budget limit": this host has **no session-level turn budget or hard gate**, so
-the old "触及轮数或预算上限时" could essentially never fire, while a turn that did not wrap up is
-the situation that actually occurs.
+The default is deliberately **short**: it asks the one question that decides whether to stop — is the
+acceptance checklist done? — instead of spelling out the whole wrap-up procedure. This host has **no
+session-level turn budget or hard gate**, so the older wording's branch about "触及轮数或预算上限"
+could essentially never fire; and because the reminder is reread on every hit, a long coercive text
+costs tokens on each one while shaping the reply more than it helps. Longer variants the user has used
+are kept below as copy-paste examples.
 
 The default text is wrapped in `【 … 】`, matching the style this channel's notices originally used,
 and its tail carries a **compression-time instruction**: `压缩时不保留本括号内的内容。`. The notice is
@@ -93,11 +96,12 @@ folded summary — leaving it there only spends tokens. This instruction only co
 reminder itself; it says nothing about dropping *unverified / not-covered* items from a delivery,
 which the rules above still require.
 
-The former second "wrap-up" rule is **no longer a default** — it is kept here as a copy-paste
-example only (paste it into a new row on the Settings page if you want it):
+The former second "wrap-up" rule and the longer step notice are **no longer defaults** — they are kept
+here as copy-paste examples only (paste one into a new row on the Settings page if you want it):
 
 | rule (example, not a default) | text |
 |---|---|
+| `{ start: 10, every: 10, repeat: 0 }` | `【这是第 {{step}} 步。按需收敛：这一轮结束后，会不会改变验收标准里某一条的判定？一条都不变，就收工交付当前结果；要继续，就把“下一步要改变哪一条判定”写清楚。已通过的验证不必再确认一遍。这一轮没能收尾时（被中断、或还需要继续），交付已完成部分 + 未完成清单（原因 / 下次继续的第一步），状态标 budget-limited，不要拿残缺当完成。压缩时不保留本括号内的内容。】` |
 | `{ start: 60, every: 10, repeat: 5 }` | `这是第 {{step}} 步。按边界收尾：交付“已完成 / 未完成 / 未完成原因 / 下次继续的第一步”，状态标 budget-limited，不许用不完整的答案冒充完成。` |
 
 ## How it works
@@ -125,9 +129,9 @@ and are exactly what the model reads on that step.
           - start: 10
             every: 10
             repeat: 0
-            text: '【这是第 {{step}} 步。按需收敛：…】'
+            text: '【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】'
         userAppend: true
-        appendText: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。'
+        appendText: '交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。'
 ```
 
 | field | type | default | meaning |
@@ -154,11 +158,11 @@ navigation — title **过程插入** / **Context insertion**, placed right afte
 Settings → 过程插入
   Rules
    1  start [ 10 ]  every [ 10 ]  repeat [ 0 ]
-      text [ 【这是第 {{step}} 步。按需收敛：…】 ]
+      text [ 【这是第 {{step}} 步。思考：验收清单已完成则收工交付，未完成则继续。压缩时不保留本括号内的内容。】 ]
       将注入第 10,20,30,40,50,60,70,80,90,100,… 步（无限次）
    ( + Add rule )     ( − Remove this rule )
   Append to every user message  [x]
-  The sentence  [ 交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。 ]
+  The sentence  [ 交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。 ]
    {{step}} is only substituted in rule texts, not here.
    ( Save )  ( Restore plugin defaults )
   In effect: 1 rule · append on
@@ -211,8 +215,8 @@ silently in compositions without an HTTP carrier):
   "ok": true,
   "rules": [ { "start": 5, "every": 5, "repeat": 9, "text": "这是第 {{step}} 步。…" } ],  // live values
   "userAppend": true,
-  "appendText": "交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程。",
-  "bounds": { "start": [1, 100000], "every": [1, 1000], "repeat": [1, 1000], "text": 1000 },
+  "appendText": "交付看验收标准是否逐条达标，不看探索得多深多广；回复只写结论与证据落点，不复述过程，结构清晰可读性好。",
+  "bounds": { "start": [1, 100000], "every": [1, 1000], "repeat": [0, 1000], "text": 1000 },
   "previewHits": 10,
   "configured": { … },                                   // from the patch (same shape as above)
   "stored": { "userAppend": false },                     // what the page saved, {} when none
@@ -222,7 +226,7 @@ silently in compositions without an HTTP carrier):
 
 `POST` accepts any subset of `rules` / `userAppend` / `appendText` (`"rules": null` is the same as
 an empty list). Rejected requests answer `400` with a message such as
-`start must be an integer between 1 and 100000`, `rules[1]: repeat must be an integer between 1 and 1000`
+`start must be an integer between 1 and 100000`, `rules[1]: repeat must be an integer between 0 and 1000 (0 = unlimited)`
 (the offending row index is always named), `rules must be an array of rules`,
 `appendText must be a non-empty string of at most 1000 characters`, or `no settings provided` when
 the body carries none of them. `401`/`403` when the request fails the trust fence (loopback `Host`,
