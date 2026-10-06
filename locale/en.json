@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Convergence notice",
+    "description": "Inject a convergence line every N steps (by default \"【规划用最少的轮次达成目标。】\") and append it to every user message; both behaviours switch on the Settings page, where the line itself is editable too."
+  }
+}

@@ -1,0 +1,12 @@
+# dsh-convergence-notice bundle layer.
+# Two switchable behaviours: append the notice to every user message
+# (`userAppend`), and inject it as its own message every `every` steps
+# (`stepNotice`). The Settings page overrides both at runtime.
+- insert:
+    - id: convergence-notice
+      name: dsh-convergence-notice
+      config:
+        every: 5
+        stepNotice: true
+        userAppend: true
+        text: '【规划用最少的轮次达成目标。】'
