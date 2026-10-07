@@ -85,7 +85,7 @@ About that wording:
   the very failure the notice exists to prevent — so the exception has to be spelled out as *what to
   do instead of hurrying*, not as a quality to keep in mind.
 - the known sharp edge: the injected notice is appended **after** the user's own message of that step
-  (`index.js:478`), so on a hit step a fresh user instruction is read first and this line last; read
+  (`index.js:484`), so on a hit step a fresh user instruction is read first and this line last; read
   strictly, `先别理用户` then defers a real instruction rather than only the impatience. It is a nudge,
   not a gate, and it is tunable per profile from the Settings page without a commit.
 - it stays **short** on purpose. The reminder is reread on every hit, and this host has **no
@@ -259,12 +259,12 @@ The three sources are read at different moments — worth knowing before you edi
 
 | you changed | read when | what it needs |
 |---|---|---|
-| a rule / the switch / the sentence on the **Settings page** (Save) | never re-read from disk: `POST` rewrites the live values in memory (`index.js:490-492`), and the next step already sees them | nothing — no restart, no patch edit |
-| `cordis.patch.yml` (the row's `config`) | **once, when the plugin row is mounted**: `apply(ctx, config)` copies `config.rules` / `config.userAppend` / `config.appendText` into a frozen `configured` object (`index.js:404-409`), and the `agent/pre-step` handler only reads those closure variables (`index.js:454`) | a **remount** — restart DSH (the host stacks and parses the patch layers during profile boot) |
+| a rule / the switch / the sentence on the **Settings page** (Save) | never re-read from disk: `POST` rewrites the live values in memory (`index.js:496-498`), and the next step already sees them | nothing — no restart, no patch edit |
+| `cordis.patch.yml` (the row's `config`) | **once, when the plugin row is mounted**: `apply(ctx, config)` copies `config.rules` / `config.userAppend` / `config.appendText` into a frozen `configured` object (`index.js:410-415`), and the `agent/pre-step` handler only reads those closure variables (`index.js:460`) | a **remount** — restart DSH (the host stacks and parses the patch layers during profile boot) |
 | the built-in defaults inside `index.js` (`DEFAULT_RULES`, `DEFAULT_APPEND_TEXT`, `DEFAULT_USER_APPEND`) | the same mount-time read, through `configured` | a remount / restart — *unless* the host hot-reloads the plugin module (it re-imports the module when a file changes on disk; observed mid-session: a new `text` took effect and a new HTTP route appeared) |
 
 There is **no per-step config read and no cache to invalidate**: the event handler looks at the closure
-variables once per step (`if (userAppend)`, `index.js:454`) and never at `ctx` config. So a running
+variables once per step (`if (userAppend)`, `index.js:460`) and never at `ctx` config. So a running
 process keeps whatever it captured at mount, and the only way to change an already-mounted row without
 a restart is the Settings page.
 
