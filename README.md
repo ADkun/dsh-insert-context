@@ -73,12 +73,21 @@ from step 10, every 10 steps, unlimited:
 
 | # | rule | text |
 |---|---|---|
-| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！` |
+| 1 | `{ start: 10, every: 10, repeat: 0 }` (unlimited) | `现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~` |
 
 About that wording:
 
 - it is the **plain literal** the user asked for — no `【 … 】` brackets and no compression sentence;
 - the tone check holds: it contains none of 必须 / 不许 / 立刻;
+- the second clause is **conditional on the agent's own state** (`如果还有没做完的事情`) and names an
+  action, where the older wording named a virtue (`别牺牲回答质量`) with no trigger and no action to
+  take. A model reading `用户催你搞快点啦` alone resolves that tension by wrapping the task up early —
+  the very failure the notice exists to prevent — so the exception has to be spelled out as *what to
+  do instead of hurrying*, not as a quality to keep in mind.
+- the known sharp edge: the injected notice is appended **after** the user's own message of that step
+  (`index.js:478`), so on a hit step a fresh user instruction is read first and this line last; read
+  strictly, `先别理用户` then defers a real instruction rather than only the impatience. It is a nudge,
+  not a gate, and it is tunable per profile from the Settings page without a commit.
 - it stays **short** on purpose. The reminder is reread on every hit, and this host has **no
   session-level turn budget or hard gate**, so an older wording's branch about "触及轮数或预算上限"
   could essentially never fire. Longer, more coercive texts cost tokens on every hit while shaping the
@@ -132,7 +141,7 @@ and are exactly what the model reads on that step.
           - start: 10
             every: 10
             repeat: 0
-            text: '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！'
+            text: '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~'
         userAppend: false
         appendText: '[注：回复不复述过程，结构清晰可读性好。]'
 ```
@@ -161,7 +170,7 @@ navigation — title **过程插入** / **Context insertion**, placed right afte
 Settings → 过程插入
   Rules
    1  start [ 10 ]  every [ 10 ]  repeat [ 0 ]
-      text [ 现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！ ]
+      text [ 现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~ ]
       将注入第 10,20,30,40,50,60,70,80,90,100,… 步（无限次）
    ( + Add rule )     ( − Remove this rule )
   Append to every user message  [ ]      ← off by default
@@ -216,7 +225,7 @@ silently in compositions without an HTTP carrier):
 ```jsonc
 {
   "ok": true,
-  "rules": [ { "start": 10, "every": 10, "repeat": 0, "text": "现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！" } ],  // live values
+  "rules": [ { "start": 10, "every": 10, "repeat": 0, "text": "现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~" } ],  // live values
   "userAppend": false,
   "appendText": "[注：回复不复述过程，结构清晰可读性好。]",
   "bounds": { "start": [1, 100000], "every": [1, 1000], "repeat": [0, 1000], "text": 1000 },
@@ -266,7 +275,7 @@ even after the host hot-reloads the plugin file, restart DSH.
 
 - Rules: the text appears as a user-role context message (source kind `insert-context`) on exactly
   the steps of the hit set — e.g. with the default, on the 10th, 20th, 30th … step of an agent
-  (`repeat: 0` never stops), each carrying its own step number in `这是第 N 步。`.
+  (`repeat: 0` never stops), each carrying its own step number in `现在是第 N 步`.
 - Append (only when the switch is on): the sentence is the last paragraph of each message you send, in
   the transcript as well as in the request. With the shipped default (`userAppend: false`) no message
   carries it.
@@ -283,7 +292,7 @@ harness context (no DSH process, no network, no dependencies) and covers the hit
 `{60,10,5}` step by step, silence before `start` and after `repeat` runs out, `{{step}}`
 substitution, unknown placeholders kept verbatim plus the warning, the merge order, the
 duplicate-suppression rule, the per-agent counter, the defaults, the precedence chain, every route
-status (`200`/`400`/`403`/`404`/`405`) and the store file on disk — 71 checks.
+status (`200`/`400`/`403`/`404`/`405`) and the store file on disk — 73 checks.
 
 ## License
 

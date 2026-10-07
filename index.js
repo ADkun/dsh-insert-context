@@ -49,16 +49,22 @@ const MAX_BODY_BYTES = 64 * 1024
  * The one rule shipped as the built-in default: from step 10, every 10 steps,
  * unlimited (the user removed the second "wrap-up" rule from the defaults and
  * asked for an advisory tone — a suggestion, not an order). The default is the
- * short, playful nudge: ten steps in, say the step number and ask not to trade
- * quality for speed. Older/longer wordings survive in the README as examples
- * only (the bracketed notice, the long "wrap-up" text).
+ * short, playful nudge: ten steps in, say the step number, hand over the user's
+ * impatience, and attach the one exception that matters — unfinished work
+ * outranks the hurry. Its second clause is deliberately *conditional on the
+ * agent's own state* ("如果还有没做完的事情") rather than a virtue ("别牺牲回答质量"):
+ * the older wording named a quality to protect but gave no trigger and no
+ * action, and a model reading "用户催你搞快点啦" resolved that tension by
+ * wrapping up early — the exact failure the notice exists to prevent. Older and
+ * longer wordings survive in the README as examples only (the bracketed notice,
+ * the long "wrap-up" text).
  */
 const DEFAULT_RULES = Object.freeze([
   Object.freeze({
     start: 10,
     every: 10,
     repeat: 0,
-    text: '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！',
+    text: '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~',
   }),
 ])
 

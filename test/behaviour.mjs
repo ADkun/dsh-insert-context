@@ -30,7 +30,7 @@ const settingsPath = path.join(profile, 'insert-context.json')
 const { apply } = await import(pathToFileURL(path.join(here, '..', 'index.js')).href)
 
 const APPEND_TEXT = '[注：回复不复述过程，结构清晰可读性好。]'
-const DEFAULT_RULE_TEXT = '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！'
+const DEFAULT_RULE_TEXT = '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~'
 const KIND = 'insert-context'
 const RULE_1_TEXT =
   '这是第 {{step}} 步。停一下：你这一轮结束会改变哪一条验收判定？写不出就现在收工交付。验证只做一层，重跑要说明想改变哪条判定；自评不算达标；返工上限 1 轮且只许点名补缺（缺哪条 + 缺什么证据）。'
@@ -182,7 +182,7 @@ console.log('rule model — hit steps, {{step}}, merge order')
   check('the default rule text is the short step-10 nudge, verbatim', () => {
     const [rule] = fresh.body.rules
     assert.equal(rule.text, DEFAULT_RULE_TEXT, 'the default rule text is the short step-10 nudge')
-    assert.equal(rule.text, '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！')
+    assert.equal(rule.text, '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~')
     assert.ok(!rule.text.includes('【') && !rule.text.includes('】'), 'the default rule text carries no 【 】')
     assert.ok(!rule.text.includes('压缩时'), 'the default rule text carries no compression sentence')
     assert.ok(rule.text.length <= 1000, `default rule text is ${rule.text.length} characters`)

@@ -15,6 +15,6 @@
           - start: 10
             every: 10
             repeat: 0
-            text: '现在是第 {{step}} 步，用户催你搞快点啦！但别牺牲回答质量哦！'
+            text: '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~'
         userAppend: false
         appendText: '[注：回复不复述过程，结构清晰可读性好。]'
