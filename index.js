@@ -47,24 +47,24 @@ const MAX_BODY_BYTES = 64 * 1024
 
 /**
  * The one rule shipped as the built-in default: from step 10, every 10 steps,
- * unlimited (the user removed the second "wrap-up" rule from the defaults and
- * asked for an advisory tone — a suggestion, not an order). The default is the
- * short, playful nudge: ten steps in, say the step number, hand over the user's
+ * unlimited (the user removed the second "wrap-up" rule and asked for a nudge,
+ * not an order). Ten steps in, say the step number, hand over the user's
  * impatience, and attach the one exception that matters — unfinished work
- * outranks the hurry. Its second clause is deliberately *conditional on the
- * agent's own state* ("如果还有没做完的事情") rather than a virtue ("别牺牲回答质量"):
- * the older wording named a quality to protect but gave no trigger and no
- * action, and a model reading "用户催你搞快点啦" resolved that tension by
- * wrapping up early — the exact failure the notice exists to prevent. Older and
- * longer wordings survive in the README as examples only (the bracketed notice,
- * the long "wrap-up" text).
+ * outranks the hurry. That clause is deliberately *conditional on the agent's
+ * own state* ("如果还有没做完的事情") and names an action, where the older wording
+ * named a virtue ("别牺牲回答质量") with no trigger and no action to take: read
+ * right after "用户催你搞快点啦", a model resolved that tension by wrapping up
+ * early — the failure this notice exists to prevent. The pressure is put on
+ * the work, never on the user: "先别理用户" would read as licence to defer a
+ * live instruction, because this line lands after the user's own message of
+ * that step. Older/longer wordings live in the README as examples only.
  */
 const DEFAULT_RULES = Object.freeze([
   Object.freeze({
     start: 10,
     every: 10,
     repeat: 0,
-    text: '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情就先别理用户哦~',
+    text: '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情，就把事做完再说吧~',
   }),
 ])
 
