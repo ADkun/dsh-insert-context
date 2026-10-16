@@ -37,6 +37,12 @@ const MAX_HITS = 100000
  * default delivery is just the per-step rule injection. */
 const DEFAULT_USER_APPEND = false
 
+/** Whether the append also reaches subagent steps. A subagent's "user" messages
+ * are prompts the dispatcher sent it, not a person's — they carry the same
+ * `source.kind`, so without this switch the append would leak into every
+ * delegated prompt. Off by default: only the user's own messages get it. */
+const DEFAULT_APPEND_SUBAGENTS = false
+
 /** Producer tag recorded on every injected message (unknown kinds fall through by contract). */
 const SOURCE_KIND = 'insert-context'
 
@@ -263,6 +269,8 @@ function normalizeSettings(raw, logger) {
   }
   const userAppend = validFlag(raw?.userAppend)
   if (userAppend !== undefined) settings.userAppend = userAppend
+  const appendSubagents = validFlag(raw?.appendSubagents)
+  if (appendSubagents !== undefined) settings.appendSubagents = appendSubagents
   const appendText = validText(raw?.appendText)
   if (appendText !== undefined) {
     warnUnknownPlaceholders(appendText, logger, 'appendText')
@@ -390,9 +398,28 @@ function createNoticeMessage(text) {
  * (`agent.prompt` from the web UI, the CLI, ACP or an SDK) with
  * `source: { kind: 'user', rpcId, ... }`, while the loop's own context messages,
  * this plugin's injections and subagent steering all use their own kinds.
+ *
+ * A subagent's prompts come from its dispatcher through `delegate` /
+ * `send_message` and arrive tagged `kind: 'user'` exactly like a person's — the
+ * tag alone cannot tell them apart. The step payload can: the agent the step
+ * belongs to carries its session, whose header records the delegation depth.
  */
 function isUserMessage(message) {
   return message?.source?.kind === 'user'
+}
+
+/**
+ * Is this step running inside a subagent? Delegation depth is monotone down the
+ * delegation chain, so depth ≥ 1 means "not the top-level session" — the same
+ * accounting `dsh-subagent` itself uses (`delegationDepthOf`). The header is
+ * read defensively: a payload without a session/header (as in the plugin's own
+ * tests) is treated as top-level, never as a subagent.
+ */
+function isSubagentStep(agent) {
+  const header = agent?.session?.header
+  if (header?.origin === 'subagent') return true
+  const depth = Math.max(header?.delegationDepth ?? 0, agent?.options?.subagentDepth ?? 0)
+  return depth >= 1
 }
 
 /**
@@ -411,6 +438,7 @@ export function apply(ctx, config = {}) {
   const configured = Object.freeze({
     rules: configuredRules,
     userAppend: validFlag(config.userAppend) ?? DEFAULT_USER_APPEND,
+    appendSubagents: validFlag(config.appendSubagents) ?? DEFAULT_APPEND_SUBAGENTS,
     appendText: validText(config.appendText) ?? DEFAULT_APPEND_TEXT,
   })
   for (const rule of configuredRules) warnUnknownPlaceholders(rule.text, ctx.logger, 'a configured rule')
@@ -424,6 +452,7 @@ export function apply(ctx, config = {}) {
   /** Live behaviour: the saved choice when there is one, else the row's Config. */
   let rules = Array.isArray(stored.rules) ? stored.rules : configured.rules
   let userAppend = stored.userAppend ?? configured.userAppend
+  let appendSubagents = stored.appendSubagents ?? configured.appendSubagents
   let appendText = stored.appendText ?? configured.appendText
 
   /** Per-agent step counter, keyed by agent id. */
@@ -433,6 +462,7 @@ export function apply(ctx, config = {}) {
     ok: true,
     rules,
     userAppend,
+    appendSubagents,
     appendText,
     bounds: {
       start: [MIN_START, MAX_START],
@@ -454,10 +484,12 @@ export function apply(ctx, config = {}) {
 
     // Behaviour 1 — the append text trails every prompt the user just sent. The
     // decision's messages are the ones this step journals, so the appended copy
-    // is what the model reads *and* what the session log keeps.
+    // is what the model reads *and* what the session log keeps. A subagent's
+    // "user" messages are prompts its dispatcher sent, so they only get the
+    // append when the subagent switch (`appendSubagents`) is on.
     let messages = claimed
     let appended = false
-    if (userAppend) {
+    if (userAppend && (appendSubagents || !isSubagentStep(payload.agent))) {
       for (const message of claimed) {
         if (isUserMessage(message)) {
           appended = true
@@ -495,6 +527,7 @@ export function apply(ctx, config = {}) {
     stored = next
     rules = Array.isArray(next.rules) ? next.rules : configured.rules
     userAppend = next.userAppend ?? configured.userAppend
+    appendSubagents = next.appendSubagents ?? configured.appendSubagents
     appendText = next.appendText ?? configured.appendText
   }
 
@@ -568,6 +601,12 @@ export function apply(ctx, config = {}) {
               if (value === undefined) error = 'userAppend must be true or false'
               else next.userAppend = value
             }
+            if ('appendSubagents' in body) {
+              touched = true
+              const value = validFlag(body.appendSubagents)
+              if (value === undefined) error = 'appendSubagents must be true or false'
+              else next.appendSubagents = value
+            }
             if ('appendText' in body) {
               touched = true
               const value = validText(body.appendText)
@@ -590,7 +629,7 @@ export function apply(ctx, config = {}) {
             }
             applySettings(next)
             ctx.logger?.info?.(
-              `insert-context: ${rules.length} rule(s), user-message append ${userAppend ? 'on' : 'off'}, append text of ${appendText.length} character(s)`,
+              `insert-context: ${rules.length} rule(s), user-message append ${userAppend ? 'on' : 'off'}${userAppend ? ` (subagents ${appendSubagents ? 'included' : 'skipped'})` : ''}, append text of ${appendText.length} character(s)`,
             )
             return send(200, describe())
           },

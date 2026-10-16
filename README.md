@@ -7,7 +7,10 @@ you define. Two independent behaviours, both configured from DSH's Settings page
    agent's current step number is one of the steps the rule hits, the text is injected as one extra
    context message. `{{step}}` in the text is replaced by the current step number.
 2. **Append to every user message** — one sentence is appended to the end of each user message you
-   send. **Off by default**; turn it on in Settings if you want it.
+   send. **Off by default**; turn it on in Settings if you want it. A second switch,
+   **append to subagents** (`appendSubagents`, also off by default), decides whether messages *sent
+   to subagents* (via `delegate` / `send_message`) get the append too — they are tagged as user
+   messages just like yours, so without this switch they would be indistinguishable.
 
 Either behaviour can be turned off (an empty rule list injects nothing; `userAppend: false` stops
 the append — the shipped default), and nothing is injected unless a rule or the append is actually
@@ -125,7 +128,10 @@ The plugin listens on the host event `agent/pre-step`. It awaits the downstream 
 the step is admitted, rewrites the messages that step will carry:
 
 - every message whose `source.kind === 'user'` gets one extra trailing `text` block when
-  `userAppend` is on — the user's own text is never modified; the sentence is its own paragraph;
+  `userAppend` is on — the user's own text is never modified; the sentence is its own paragraph.
+  A subagent's prompts also carry `source.kind === 'user'` (they are sent by the dispatcher), so
+  the plugin checks which agent the step belongs to: inside a subagent (delegation depth ≥ 1, or
+  session origin `subagent`) the append is skipped unless `appendSubagents` is on;
 - one standalone `user` message (source kind `insert-context`) is appended when the step number
   hits at least one rule, carrying the merged paragraphs.
 
@@ -146,6 +152,7 @@ and are exactly what the model reads on that step.
             repeat: 0
             text: '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情，就把事做完再说吧~'
         userAppend: false
+        appendSubagents: false
         appendText: '[注：回复不复述过程，结构清晰可读性好。]'
 ```
 
@@ -157,6 +164,7 @@ and are exactly what the model reads on that step.
 | `rules[].repeat` | integer 0–1000; **`0` = unlimited** | `0` (unlimited) | how many hits in total; after that the rule goes quiet. `0` never goes quiet |
 | `rules[].text` | non-empty string, ≤ 1000 characters | see *Defaults* | the injected text; `{{step}}` is filled in |
 | `userAppend` | boolean | `false` (off) | append `appendText` to every user message |
+| `appendSubagents` | boolean | `false` (off) | also append to messages sent *to subagents* (which arrive tagged as user messages) |
 | `appendText` | non-empty string, ≤ 1000 characters | the sentence above (used only when the switch is on) | the appended sentence (`{{step}}` is **not** substituted here) |
 
 Every field is overridable at runtime from the Settings page, without editing this patch.
@@ -177,6 +185,7 @@ Settings → 过程插入
       将注入第 10,20,30,40,50,60,70,80,90,100,… 步（无限次）
    ( + Add rule )     ( − Remove this rule )
   Append to every user message  [ ]      ← off by default
+  Also append to subagents      [ ]      ← off by default
   The sentence  "[注：回复不复述过程，结构清晰可读性好。]"   ← those brackets are part of the text
    {{step}} is only substituted in rule texts, not here.
    ( Save )  ( Restore plugin defaults )
@@ -222,7 +231,7 @@ silently in compositions without an HTTP carrier):
 | route | method | body | answer |
 |---|---|---|---|
 | `/api/insert-context/settings` | `GET` | — | the state (below) |
-| `/api/insert-context/settings` | `POST` | `{ "rules": [ … ], "userAppend": true, "appendText": "…" }` (any subset) | the new state |
+| `/api/insert-context/settings` | `POST` | `{ "rules": [ … ], "userAppend": true, "appendSubagents": true, "appendText": "…" }` (any subset) | the new state |
 | `/api/insert-context/settings` | `DELETE` | — | drops the saved file, back to the Config defaults |
 
 ```jsonc
@@ -230,6 +239,7 @@ silently in compositions without an HTTP carrier):
   "ok": true,
   "rules": [ { "start": 10, "every": 10, "repeat": 0, "text": "现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情，就把事做完再说吧~" } ],  // live values
   "userAppend": false,
+  "appendSubagents": false,
   "appendText": "[注：回复不复述过程，结构清晰可读性好。]",
   "bounds": { "start": [1, 100000], "every": [1, 1000], "repeat": [0, 1000], "text": 1000 },
   "previewHits": 10,
@@ -239,10 +249,11 @@ silently in compositions without an HTTP carrier):
 }
 ```
 
-`POST` accepts any subset of `rules` / `userAppend` / `appendText` (`"rules": null` is the same as
-an empty list). Rejected requests answer `400` with a message such as
-`start must be an integer between 1 and 100000`, `rules[1]: repeat must be an integer between 0 and 1000 (0 = unlimited)`
+`POST` accepts any subset of `rules` / `userAppend` / `appendSubagents` / `appendText`
+(`"rules": null` is the same as an empty list). Rejected requests answer `400` with a message such
+as `start must be an integer between 1 and 100000`, `rules[1]: repeat must be an integer between 0 and 1000 (0 = unlimited)`
 (the offending row index is always named), `rules must be an array of rules`,
+`userAppend must be true or false`, `appendSubagents must be true or false`,
 `appendText must be a non-empty string of at most 1000 characters`, or `no settings provided` when
 the body carries none of them. `401`/`403` when the request fails the trust fence (loopback `Host`,
 no cross-site fetch, `Origin`/`Referer` authority equal to the `Host` authority, plus the connection
@@ -294,8 +305,10 @@ harness context (no DSH process, no network, no dependencies) and covers the hit
 `{10,10,0}` (unlimited, asserted over 200 executed steps and again at step 300), `{5,5,9}` and
 `{60,10,5}` step by step, silence before `start` and after `repeat` runs out, `{{step}}`
 substitution, unknown placeholders kept verbatim plus the warning, the merge order, the
-duplicate-suppression rule, the per-agent counter, the defaults, the precedence chain, every route
-status (`200`/`400`/`403`/`404`/`405`) and the store file on disk — 73 checks.
+duplicate-suppression rule, the subagent gate (default off, depth/origin detection, rules still
+firing on subagent steps that skipped the append), the per-agent counter, the defaults, the
+precedence chain, every route status (`200`/`400`/`403`/`404`/`405`) and the store file on disk —
+83 checks.
 
 ## License
 

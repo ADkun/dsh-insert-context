@@ -105,14 +105,19 @@ function mount(config) {
 }
 
 /** Drive one pre-step through every registered listener. */
-async function step(mounted, { agentId = 'a1', messages = [], kind = 'enter', turn = 1, step: ordinal = 1 } = {}) {
-  const payload = { agent: { id: agentId }, messages, turn, step: ordinal }
+async function step(mounted, { agentId = 'a1', agent, messages = [], kind = 'enter', turn = 1, step: ordinal = 1 } = {}) {
+  const payload = { agent: agent ?? { id: agentId }, messages, turn, step: ordinal }
   let decision = kind === 'enter' ? { kind: 'enter', messages } : { kind: 'reject' }
   for (const fn of mounted.listeners.get('agent/pre-step') ?? []) {
     const inner = decision
     decision = await fn(payload, async () => inner)
   }
   return decision
+}
+
+/** A subagent-shaped agent payload: delegation depth ≥ 1 (as dsh-subagent stamps it). */
+function subagentAgent(id = 'sub1', header = {}) {
+  return { id, session: { header: { delegationDepth: 1, origin: 'subagent', ...header } } }
 }
 
 /** Drive `n` executed steps for one agent, collecting the injected texts. */
@@ -196,6 +201,10 @@ console.log('rule model — hit steps, {{step}}, merge order')
     assert.equal(fresh.body.userAppend, false)
     assert.equal(fresh.body.configured.userAppend, false)
     assert.deepEqual(fresh.body.stored, {}, 'no saved file, so the new default is what is live')
+  })
+  check('appendSubagents is off by default too', () => {
+    assert.equal(fresh.body.appendSubagents, false)
+    assert.equal(fresh.body.configured.appendSubagents, false)
   })
 
   // Rule 1 alone: {start:5, every:5, repeat:9} → 5,10,15,20,25,30,35,40,45 — the
@@ -387,6 +396,75 @@ console.log('append behaviour and the duplicate-suppression rule')
   })
 }
 
+console.log('the append-to-subagents switch')
+{
+  // The dispatcher's prompts to a subagent are tagged kind:'user' exactly like
+  // a person's, so the append must be gated on the step's agent, not on the
+  // message: subagent steps skip it unless appendSubagents is on.
+  const subOff = mount({ rules: [], userAppend: true })
+  const subUntouched = await step(subOff, {
+    agentId: 'sa1',
+    agent: subagentAgent('sa1'),
+    messages: [userMessage('delegate prompt')],
+  })
+  check('appendSubagents:false (default) — a subagent step leaves its user message untouched', () => {
+    assert.equal(subUntouched.messages.length, 1)
+    assert.equal(subUntouched.messages[0].content.length, 1)
+    assert.equal(subUntouched.messages[0].content[0].text, 'delegate prompt')
+  })
+  const topStill = await step(subOff, { agentId: 'sa2', messages: [userMessage('hello')] })
+  check('appendSubagents:false — the top-level agent still gets the append', () => {
+    assert.equal(topStill.messages[0].content.length, 2)
+    assert.equal(topStill.messages[0].content[1].text, APPEND_TEXT)
+  })
+  const bareStill = await step(subOff, { agentId: 'sa3', messages: [userMessage()] })
+  check('an agent payload without a session (test fakes) is treated as top-level', () => {
+    assert.equal(bareStill.messages[0].content.length, 2)
+  })
+
+  const subOn = mount({ rules: [], userAppend: true, appendSubagents: true })
+  const subAppended = await step(subOn, {
+    agentId: 'sa4',
+    agent: subagentAgent('sa4'),
+    messages: [userMessage('delegate prompt')],
+  })
+  check('appendSubagents:true — the subagent step gets the append on its user message', () => {
+    assert.equal(subAppended.messages.length, 1)
+    assert.equal(subAppended.messages[0].content.length, 2)
+    assert.equal(subAppended.messages[0].content[1].text, APPEND_TEXT)
+  })
+  const depthOnly = await step(subOff, {
+    agentId: 'sa5',
+    agent: { id: 'sa5', session: { header: { delegationDepth: 2 } } },
+    messages: [userMessage()],
+  })
+  check('delegationDepth ≥ 1 alone marks the step as a subagent (no origin needed)', () => {
+    assert.equal(depthOnly.messages[0].content.length, 1)
+  })
+  const optionsDepth = await step(subOff, {
+    agentId: 'sa6',
+    agent: { id: 'sa6', options: { subagentDepth: 1 } },
+    messages: [userMessage()],
+  })
+  check('agent.options.subagentDepth alone also marks the step as a subagent', () => {
+    assert.equal(optionsDepth.messages[0].content.length, 1)
+  })
+
+  // Duplicate suppression follows the append decision per step: a subagent step
+  // that skipped the append still gets its rule message.
+  const subRule = mount({ rules: [{ start: 1, every: 1, repeat: 1, text: 'RULE {{step}}' }], userAppend: true })
+  const subRuleDecision = await step(subRule, {
+    agentId: 'sa7',
+    agent: subagentAgent('sa7'),
+    messages: [userMessage()],
+  })
+  await checkAsync('a subagent step that skipped the append still receives the rule message', async () => {
+    assert.equal(subRuleDecision.messages.length, 2, 'the user message plus the rule message')
+    assert.equal(subRuleDecision.messages[0].content.length, 1, 'the user message is untouched')
+    assert.equal(subRuleDecision.messages[1].source.kind, KIND)
+  })
+}
+
 console.log('step counting')
 {
   const mounted = mount({ rules: [{ start: 2, every: 1, repeat: 5, text: 'S{{step}}' }] })
@@ -420,6 +498,7 @@ console.log('HTTP surface')
     assert.equal(initial.body.ok, true)
     assert.deepEqual(initial.body.rules, [{ start: 5, every: 5, repeat: 9, text: 'R {{step}}' }])
     assert.equal(initial.body.userAppend, true)
+    assert.equal(initial.body.appendSubagents, false)
     assert.equal(initial.body.appendText, APPEND_TEXT)
     assert.deepEqual(initial.body.bounds, { start: [1, 100000], every: [1, 1000], repeat: [0, 1000], text: 1000 })
     assert.equal(initial.body.previewHits, 10)
@@ -506,6 +585,13 @@ console.log('HTTP surface')
     assert.equal(onlyAppend.body.appendText, 'just this line')
     assert.deepEqual(onlyAppend.body.rules, [])
   })
+  const subToggle = await request(remounted, { method: 'POST', body: { appendSubagents: true } })
+  check('a body holding nothing but appendSubagents is a valid patch', () => {
+    assert.equal(subToggle.status, 200)
+    assert.equal(subToggle.body.appendSubagents, true)
+    assert.equal(subToggle.body.stored.appendSubagents, true)
+    assert.equal(stored().appendSubagents, true, 'and it is persisted')
+  })
 
   const empty = await request(remounted, { method: 'POST', body: {} })
   check('400 on an empty patch', () => {
@@ -543,6 +629,7 @@ console.log('invalid input is rejected')
     ['a rule that is not an object', { rules: ['nope'] }, 'rules[0]: a rule must be an object with start, every, repeat and text'],
     ['the second row is named in the error', { rules: [{ start: 1, every: 1, repeat: 1, text: 'ok' }, { start: 1, every: 1, repeat: 1001, text: 'ok' }] }, 'rules[1]: repeat must be an integer between 0 and 1000 (0 = unlimited)'],
     ['non-boolean userAppend', { userAppend: 'yes' }, 'userAppend must be true or false'],
+    ['non-boolean appendSubagents', { appendSubagents: 'yes' }, 'appendSubagents must be true or false'],
     ['empty appendText', { appendText: '' }, 'appendText must be a non-empty string of at most 1000 characters'],
     ['appendText above 1000 code units', { appendText: 'x'.repeat(1001) }, 'appendText must be a non-empty string of at most 1000 characters'],
     ['non-string appendText', { appendText: 42 }, 'appendText must be a non-empty string of at most 1000 characters'],

@@ -67,6 +67,8 @@ window.__ModuleLoader__.load({
         invalid: '还有不合法的输入，未保存',
         append: '追加到每条用户消息',
         appendHint: '开关与文案独立于规则列表：开启后每条你发的消息末尾都会追加下面这句；{{step}} 只在规则文案里生效，这句里会原样输出。',
+        appendSubagents: '也追加到子智能体',
+        appendSubagentsHint: '子智能体收到的消息由调度者发出（delegate / send_message），在消息层面也是「用户消息」。关掉这项时子智能体的消息保持原样；打开后，发给子智能体的消息末尾同样会追加这句。',
         appendLabel: '追加文案',
         appendPlaceholder: '[注：回复不复述过程，结构清晰可读性好。]',
         appendInvalid: '追加文案不能为空，且最多 1000 个字符',
@@ -74,6 +76,7 @@ window.__ModuleLoader__.load({
         sep: '：',
         stateRules: '{n} 条规则',
         stateAppend: '用户消息追加',
+        stateAppendSubagents: '子智能体消息追加',
         stateAppendText: '追加文案',
         on: '开',
         off: '关',
@@ -120,6 +123,9 @@ window.__ModuleLoader__.load({
         append: 'Append to every user message',
         appendHint:
           'This switch and its text are independent of the rules: when on, every message you send carries the line below. {{step}} only works inside rule texts — here it is printed verbatim.',
+        appendSubagents: 'Also append to subagent messages',
+        appendSubagentsHint:
+          "A subagent's messages come from the dispatcher (delegate / send_message) and are tagged as user messages too. With this off, subagent messages stay untouched; with it on, the line is appended to messages sent to subagents as well.",
         appendLabel: 'Appended line',
         appendPlaceholder: '[注：回复不复述过程，结构清晰可读性好。]',
         appendInvalid: 'The appended line cannot be empty and takes at most 1000 characters',
@@ -127,6 +133,7 @@ window.__ModuleLoader__.load({
         sep: ': ',
         stateRules: '{n} rule(s)',
         stateAppend: 'appended to user messages',
+        stateAppendSubagents: 'appended to subagent messages',
         stateAppendText: 'Appended line',
         on: 'on',
         off: 'off',
@@ -260,6 +267,7 @@ window.__ModuleLoader__.load({
       const [state, setState] = useState({ status: 'loading' })
       const [drafts, setDrafts] = useState([])
       const [draftAppend, setDraftAppend] = useState(false)
+      const [draftAppendSubagents, setDraftAppendSubagents] = useState(false)
       const [draftAppendText, setDraftAppendText] = useState('')
       const [busy, setBusy] = useState('')
       const [message, setMessage] = useState('')
@@ -277,6 +285,7 @@ window.__ModuleLoader__.load({
           })),
         )
         setDraftAppend(payload?.userAppend === true)
+        setDraftAppendSubagents(payload?.appendSubagents === true)
         setDraftAppendText(String(payload?.appendText ?? ''))
       }
 
@@ -357,7 +366,7 @@ window.__ModuleLoader__.load({
           rules.push(checked.rule)
         }
         setBusy('save')
-        send('POST', { rules, userAppend: draftAppend, appendText: draftAppendText }, t('saved'))
+        send('POST', { rules, userAppend: draftAppend, appendSubagents: draftAppendSubagents, appendText: draftAppendText }, t('saved'))
       }
 
       const reset = () => {
@@ -472,6 +481,22 @@ window.__ModuleLoader__.load({
                 }),
                 h('span', { className: 'cn_track', 'aria-hidden': 'true' }, h('span', { className: 'cn_knob' }))),
               h('span', { className: 'cn_optText' }, h('span', { className: 'cn_hint' }, t('appendHint')))),
+            h('div', { className: 'cn_opt' },
+              h('label', { className: 'cn_switch' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: draftAppendSubagents,
+                  disabled: locked,
+                  'aria-label': t('appendSubagents'),
+                  onChange: event => {
+                    setDraftAppendSubagents(event.target.checked)
+                    clear()
+                  },
+                }),
+                h('span', { className: 'cn_track', 'aria-hidden': 'true' }, h('span', { className: 'cn_knob' }))),
+              h('span', { className: 'cn_optText' },
+                h('span', { className: 'cn_optLabel' }, t('appendSubagents')),
+                h('span', { className: 'cn_hint' }, t('appendSubagentsHint')))),
             h('span', { className: 'cn_label' }, t('appendLabel')),
             h('textarea', {
               className: 'cn_area',
@@ -491,6 +516,8 @@ window.__ModuleLoader__.load({
               h('b', null, fill(t('stateRules'), { n: Array.isArray(value.rules) ? value.rules.length : 0 }))),
             h('span', null, t('stateAppend'), t('sep'),
               h('b', null, value.userAppend === false ? t('off') : t('on'))),
+            h('span', null, t('stateAppendSubagents'), t('sep'),
+              h('b', null, value.appendSubagents === true ? t('on') : t('off'))),
             h('span', null, t('stateAppendText'), t('sep'), h('b', null, String(value.appendText ?? ''))),
             h('span', { className: 'cn_note' },
               Object.keys(stored).length > 0 ? t('fromStored') : t('fromConfigured'))),
