@@ -46,6 +46,11 @@ window.__ModuleLoader__.load({
         nav: '过程插入',
         title: '过程插入',
         subtitle: '每条规则写清「从第 X 步开始、每 Y 步提醒一次、共提醒 Z 次」和文案；命中时插入一条独立消息。可增删多行，行序就是同一步多条命中时的拼接顺序。',
+        enabled: '启用本插件',
+        enabledHint:
+          '总开关。关掉后插件完全停用：不追加文案、不插入规则消息，步数也不再累计——重新打开时从停下的步数继续，不会补发停用期间错过的提醒。',
+        enabledOn: '已启用',
+        enabledOff: '已停用（本插件当前不做任何事）',
         rules: '注入规则',
         rulesHint: '文案里的 {{step}} 会在注入时替换成当前步数；同一个 Agent 各自计步，调度者与子代理互不干扰。「提醒次数」填 0 表示无限次：从起始步开始每 N 步一直命中。',
         addRule: '添加一行',
@@ -67,6 +72,9 @@ window.__ModuleLoader__.load({
         invalid: '还有不合法的输入，未保存',
         append: '追加到每条用户消息',
         appendHint: '开关与文案独立于规则列表：开启后每条你发的消息末尾都会追加下面这句；{{step}} 只在规则文案里生效，这句里会原样输出。',
+        appendFirstOnly: '只追加到会话的首条用户消息',
+        appendFirstOnlyHint:
+          '开启后这句只追加到本会话的第一条用户消息，之后发的消息不再追加。会话边界与每条 Agent 自己的步数计数一致：Agent 被销毁重建（新会话）后，新会话的第一条用户消息会再次追加。',
         appendSubagents: '也追加到子智能体',
         appendSubagentsHint: '子智能体收到的消息由调度者发出（delegate / send_message），在消息层面也是「用户消息」。关掉这项时子智能体的消息保持原样；打开后，发给子智能体的消息末尾同样会追加这句。',
         appendLabel: '追加文案',
@@ -80,6 +88,8 @@ window.__ModuleLoader__.load({
         stateAppendText: '追加文案',
         on: '开',
         off: '关',
+        firstOnly: '只首条',
+        all: '全部',
         fromStored: '以上来自设置页，重启后仍然保留。',
         fromConfigured: '还没在设置页保存过，暂用插件配置里的默认值。',
         save: '保存',
@@ -100,6 +110,11 @@ window.__ModuleLoader__.load({
         title: 'Context insertion',
         subtitle:
           'Each rule says from which step it starts, how often it repeats, how many times it fires and what it injects. Rules fire as one standalone message; add or remove rows freely — row order is the order hits are joined on a step that trips several rules.',
+        enabled: 'Enable this plugin',
+        enabledHint:
+          'Master switch. When off the plugin is completely inert: no append, no rule message, and steps are not counted either — switching it back on resumes from where it stopped instead of replaying the notices the silent steps had missed.',
+        enabledOn: 'enabled',
+        enabledOff: 'disabled (the plugin currently does nothing)',
         rules: 'Injection rules',
         rulesHint:
           '{{step}} in a rule text is replaced with the current step number when it fires. Steps are counted per agent, so the dispatcher and each subagent count independently. A repeat count of 0 means unlimited: the rule keeps firing every N steps from its start step on.',
@@ -123,6 +138,9 @@ window.__ModuleLoader__.load({
         append: 'Append to every user message',
         appendHint:
           'This switch and its text are independent of the rules: when on, every message you send carries the line below. {{step}} only works inside rule texts — here it is printed verbatim.',
+        appendFirstOnly: 'Append to the first user message only',
+        appendFirstOnlyHint:
+          'When on, the line is appended only to the first user message of the conversation; every later message stays untouched. A session ends when its agent is disposed and recreated, so a new session gets the append on its first user message again.',
         appendSubagents: 'Also append to subagent messages',
         appendSubagentsHint:
           "A subagent's messages come from the dispatcher (delegate / send_message) and are tagged as user messages too. With this off, subagent messages stay untouched; with it on, the line is appended to messages sent to subagents as well.",
@@ -137,6 +155,8 @@ window.__ModuleLoader__.load({
         stateAppendText: 'Appended line',
         on: 'on',
         off: 'off',
+        firstOnly: 'first only',
+        all: 'all',
         fromStored: 'These come from this page and survive a restart.',
         fromConfigured: 'Nothing saved here yet; the plugin Config values are in use.',
         save: 'Save',
@@ -157,6 +177,7 @@ window.__ModuleLoader__.load({
       '.cn_title{margin:0;font-size:15px;font-weight:650}',
       '.cn_sub{margin:0;font-size:12.5px;color:var(--dsw-alias-label-secondary);max-width:66ch}',
       '.cn_card{display:flex;flex-direction:column;gap:12px;padding:14px 15px;border-radius:14px;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-2)}',
+      '.cn_cardOff{border-style:dashed}',
       '.cn_label{font-size:12px;font-weight:600}',
       '.cn_opt{display:flex;align-items:flex-start;gap:12px}',
       '.cn_switch{position:relative;display:inline-flex;flex:0 0 auto;width:36px;height:20px;margin-top:1px;cursor:pointer}',
@@ -198,6 +219,7 @@ window.__ModuleLoader__.load({
       '.cn_state b{font-variant-numeric:tabular-nums}',
       '.cn_note{font-size:11px;color:var(--dsw-alias-label-secondary)}',
       '.cn_ok{color:var(--dsw-alias-state-success-primary)}',
+      '.cn_warn{color:var(--dsw-alias-state-warning-primary,#f0a441)}',
       '.cn_err{color:var(--dsw-alias-state-error-primary)}',
       '.cn_fieldErr{font-size:11.5px;color:var(--dsw-alias-state-error-primary)}',
     ].join('')
@@ -266,8 +288,10 @@ window.__ModuleLoader__.load({
       const { t } = props
       const [state, setState] = useState({ status: 'loading' })
       const [drafts, setDrafts] = useState([])
+      const [draftEnabled, setDraftEnabled] = useState(true)
       const [draftAppend, setDraftAppend] = useState(false)
       const [draftAppendSubagents, setDraftAppendSubagents] = useState(false)
+      const [draftAppendFirstOnly, setDraftAppendFirstOnly] = useState(false)
       const [draftAppendText, setDraftAppendText] = useState('')
       const [busy, setBusy] = useState('')
       const [message, setMessage] = useState('')
@@ -284,8 +308,10 @@ window.__ModuleLoader__.load({
             text: String(rule?.text ?? ''),
           })),
         )
+        setDraftEnabled(payload?.enabled !== false)
         setDraftAppend(payload?.userAppend === true)
         setDraftAppendSubagents(payload?.appendSubagents === true)
+        setDraftAppendFirstOnly(payload?.appendFirstOnly === true)
         setDraftAppendText(String(payload?.appendText ?? ''))
       }
 
@@ -366,7 +392,7 @@ window.__ModuleLoader__.load({
           rules.push(checked.rule)
         }
         setBusy('save')
-        send('POST', { rules, userAppend: draftAppend, appendSubagents: draftAppendSubagents, appendText: draftAppendText }, t('saved'))
+        send('POST', { enabled: draftEnabled, rules, userAppend: draftAppend, appendSubagents: draftAppendSubagents, appendFirstOnly: draftAppendFirstOnly, appendText: draftAppendText }, t('saved'))
       }
 
       const reset = () => {
@@ -451,6 +477,24 @@ window.__ModuleLoader__.load({
         }
 
         body.push(
+          h('div', { className: draftEnabled ? 'cn_card' : 'cn_card cn_cardOff', key: 'master' },
+            h('div', { className: 'cn_opt' },
+              h('label', { className: 'cn_switch' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: draftEnabled,
+                  disabled: locked,
+                  'aria-label': t('enabled'),
+                  onChange: event => {
+                    setDraftEnabled(event.target.checked)
+                    clear()
+                  },
+                }),
+                h('span', { className: 'cn_track', 'aria-hidden': 'true' }, h('span', { className: 'cn_knob' }))),
+              h('span', { className: 'cn_optText' },
+                h('span', { className: 'cn_optLabel' }, t('enabled')),
+                h('span', { className: 'cn_hint' }, t('enabledHint')))),
+            h('span', { className: draftEnabled ? 'cn_ok' : 'cn_warn' }, draftEnabled ? t('enabledOn') : t('enabledOff'))),
           h('div', { className: 'cn_card', key: 'rules' },
             h('span', { className: 'cn_label' }, t('rules')),
             drafts.length === 0
@@ -485,6 +529,22 @@ window.__ModuleLoader__.load({
               h('label', { className: 'cn_switch' },
                 h('input', {
                   type: 'checkbox',
+                  checked: draftAppendFirstOnly,
+                  disabled: locked,
+                  'aria-label': t('appendFirstOnly'),
+                  onChange: event => {
+                    setDraftAppendFirstOnly(event.target.checked)
+                    clear()
+                  },
+                }),
+                h('span', { className: 'cn_track', 'aria-hidden': 'true' }, h('span', { className: 'cn_knob' }))),
+              h('span', { className: 'cn_optText' },
+                h('span', { className: 'cn_optLabel' }, t('appendFirstOnly')),
+                h('span', { className: 'cn_hint' }, t('appendFirstOnlyHint')))),
+            h('div', { className: 'cn_opt' },
+              h('label', { className: 'cn_switch' },
+                h('input', {
+                  type: 'checkbox',
                   checked: draftAppendSubagents,
                   disabled: locked,
                   'aria-label': t('appendSubagents'),
@@ -512,10 +572,13 @@ window.__ModuleLoader__.load({
               },
             })),
           h('div', { className: 'cn_state', key: 'state' },
+            h('span', null, t('enabled'), t('sep'),
+              h('b', { className: value.enabled === false ? 'cn_warn' : 'cn_ok' },
+                value.enabled === false ? t('off') : t('on'))),
             h('span', null, t('current'), t('sep'),
               h('b', null, fill(t('stateRules'), { n: Array.isArray(value.rules) ? value.rules.length : 0 }))),
             h('span', null, t('stateAppend'), t('sep'),
-              h('b', null, value.userAppend === false ? t('off') : t('on'))),
+              h('b', null, value.userAppend === false ? t('off') : (value.appendFirstOnly ? t('firstOnly') : t('all')))),
             h('span', null, t('stateAppendSubagents'), t('sep'),
               h('b', null, value.appendSubagents === true ? t('on') : t('off'))),
             h('span', null, t('stateAppendText'), t('sep'), h('b', null, String(value.appendText ?? ''))),

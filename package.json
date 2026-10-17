@@ -1,7 +1,7 @@
 {
   "name": "dsh-insert-context",
-  "version": "1.4.0",
-  "description": "Insert a configurable context message into the agent's own context on chosen executed steps — from step X, every Y steps, Z times, with {{step}} filled in — and optionally append a sentence to every user message · 在第 X 步起每 Y 步注入一次自定义上下文（共 Z 次，文案支持 {{step}} 占位），并可在每条用户消息末尾追加一句话，两者均可在设置页配置",
+  "version": "1.5.0",
+  "description": "Insert a configurable context message into the agent's own context on chosen executed steps — from step X, every Y steps, Z times, with {{step}} filled in — and optionally append a sentence to user messages, with a master switch that silences the whole plugin · 在第 X 步起每 Y 步注入一次自定义上下文（共 Z 次，文案支持 {{step}} 占位），并可在用户消息末尾追加一句话（默认只追加到会话首条），带一个可整体停用本插件的总开关，全部可在设置页配置",
   "license": "MIT",
   "type": "module",
   "main": "./index.js",

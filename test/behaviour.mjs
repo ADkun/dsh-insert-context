@@ -30,7 +30,7 @@ const settingsPath = path.join(profile, 'insert-context.json')
 const { apply } = await import(pathToFileURL(path.join(here, '..', 'index.js')).href)
 
 const APPEND_TEXT = '[注：回复不复述过程，结构清晰可读性好。]'
-const DEFAULT_RULE_TEXT = '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情，就把事做完再说吧~'
+const DEFAULT_RULE_TEXT = '现在是第 {{step}} 步，注意任务收敛进度。'
 const KIND = 'insert-context'
 const RULE_1_TEXT =
   '这是第 {{step}} 步。停一下：你这一轮结束会改变哪一条验收判定？写不出就现在收工交付。验证只做一层，重跑要说明想改变哪条判定；自评不算达标；返工上限 1 轮且只许点名补缺（缺哪条 + 缺什么证据）。'
@@ -187,10 +187,18 @@ console.log('rule model — hit steps, {{step}}, merge order')
   check('the default rule text is the short step-10 nudge, verbatim', () => {
     const [rule] = fresh.body.rules
     assert.equal(rule.text, DEFAULT_RULE_TEXT, 'the default rule text is the short step-10 nudge')
-    assert.equal(rule.text, '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情，就把事做完再说吧~')
+    assert.equal(rule.text, '现在是第 {{step}} 步，注意任务收敛进度。')
     assert.ok(!rule.text.includes('【') && !rule.text.includes('】'), 'the default rule text carries no 【 】')
     assert.ok(!rule.text.includes('压缩时'), 'the default rule text carries no compression sentence')
     assert.ok(rule.text.length <= 1000, `default rule text is ${rule.text.length} characters`)
+  })
+  check('the master switch is on by default', () => {
+    assert.equal(fresh.body.enabled, true)
+    assert.equal(fresh.body.configured.enabled, true)
+  })
+  check('appendFirstOnly is ON by default (first user message only)', () => {
+    assert.equal(fresh.body.appendFirstOnly, true)
+    assert.equal(fresh.body.configured.appendFirstOnly, true)
   })
   check('the default appendText is the bracketed reply notice, verbatim', () => {
     assert.equal(APPEND_TEXT, '[注：回复不复述过程，结构清晰可读性好。]')
@@ -337,7 +345,7 @@ console.log('rule model — hit steps, {{step}}, merge order')
 
 console.log('append behaviour and the duplicate-suppression rule')
 {
-  const mounted = mount({ rules: [{ start: 2, every: 2, repeat: 3, text: 'RULE {{step}}' }], userAppend: true })
+  const mounted = mount({ rules: [{ start: 2, every: 2, repeat: 3, text: 'RULE {{step}}' }], userAppend: true, appendFirstOnly: false })
   const original = userMessage()
   const decision = await step(mounted, { messages: [original] })
   check('the message keeps its own text, id and source, and gains a trailing block', () => {
@@ -372,7 +380,7 @@ console.log('append behaviour and the duplicate-suppression rule')
     assert.equal(mixed.messages[1].content.length, 2)
   })
 
-  const dup = mount({ rules: [{ start: 1, every: 1, repeat: 1, text: 'RULE {{step}}' }], userAppend: true })
+  const dup = mount({ rules: [{ start: 1, every: 1, repeat: 1, text: 'RULE {{step}}' }], userAppend: true, appendFirstOnly: false })
   const dupDecision = await step(dup, { agentId: 'dup', messages: [userMessage()] })
   await checkAsync('a step that already appended to a user message does NOT also inject the rule', async () => {
     assert.equal(dupDecision.messages.length, 1, 'no extra message this step')
@@ -396,12 +404,60 @@ console.log('append behaviour and the duplicate-suppression rule')
   })
 }
 
+console.log('append dedup — tail exact match skips the append')
+{
+  const mounted = mount({ rules: [], userAppend: true, appendFirstOnly: false })
+  const already = userMessage(`do the thing\n${APPEND_TEXT}`)
+  const decided = await step(mounted, { agentId: 'dedup1', messages: [already] })
+  check('message already ending with appendText is not appended again', () => {
+    assert.equal(decided.messages.length, 1)
+    assert.equal(decided.messages[0].content.length, 1)
+    assert.equal(decided.messages[0].content[0].text, `do the thing\n${APPEND_TEXT}`)
+  })
+  const plain = await step(mounted, { agentId: 'dedup2', messages: [userMessage('do the thing')] })
+  check('message without the tail still gets the append', () => {
+    assert.equal(plain.messages[0].content.length, 2)
+    assert.equal(plain.messages[0].content[1].text, APPEND_TEXT)
+  })
+  const suffix = userMessage(`do the thing${APPEND_TEXT}`)
+  const suffixed = await step(mounted, { agentId: 'dedup3', messages: [suffix] })
+  check('tail ending exactly with appendText (no separator) still matches', () => {
+    assert.equal(suffixed.messages[0].content.length, 1)
+  })
+  const other = userMessage(`do the thing\n别的结尾`)
+  const othered = await step(mounted, { agentId: 'dedup4', messages: [other] })
+  check('a different tail still gets the append', () => {
+    assert.equal(othered.messages[0].content.length, 2)
+    assert.equal(othered.messages[0].content[1].text, APPEND_TEXT)
+  })
+  const imageTail = {
+    id: 'u5',
+    role: 'user',
+    content: [{ type: 'text', text: 'do the thing' }, { type: 'image', image: 'x' }],
+    source: { kind: 'user', rpcId: 'r5' },
+  }
+  const imaged = await step(mounted, { agentId: 'dedup5', messages: [imageTail] })
+  check('last block is not text → the append happens anyway', () => {
+    assert.equal(imaged.messages[0].content.length, 3)
+    assert.equal(imaged.messages[0].content[2].text, APPEND_TEXT)
+  })
+
+  const ruleDup = mount({ rules: [{ start: 1, every: 1, repeat: 1, text: 'RULE {{step}}' }], userAppend: true, appendFirstOnly: false })
+  const ruleDupDecision = await step(ruleDup, { agentId: 'dedup6', messages: [userMessage(`x${APPEND_TEXT}`)] })
+  await checkAsync('append skipped by dedup does not suppress the step’s rule message', async () => {
+    assert.equal(ruleDupDecision.messages.length, 2)
+    assert.equal(ruleDupDecision.messages[0].content.length, 1)
+    assert.equal(ruleDupDecision.messages[1].source.kind, KIND)
+    assert.equal(ruleDupDecision.messages[1].content[0].text, 'RULE 1')
+  })
+}
+
 console.log('the append-to-subagents switch')
 {
   // The dispatcher's prompts to a subagent are tagged kind:'user' exactly like
   // a person's, so the append must be gated on the step's agent, not on the
   // message: subagent steps skip it unless appendSubagents is on.
-  const subOff = mount({ rules: [], userAppend: true })
+  const subOff = mount({ rules: [], userAppend: true, appendFirstOnly: false })
   const subUntouched = await step(subOff, {
     agentId: 'sa1',
     agent: subagentAgent('sa1'),
@@ -422,7 +478,7 @@ console.log('the append-to-subagents switch')
     assert.equal(bareStill.messages[0].content.length, 2)
   })
 
-  const subOn = mount({ rules: [], userAppend: true, appendSubagents: true })
+  const subOn = mount({ rules: [], userAppend: true, appendFirstOnly: false, appendSubagents: true })
   const subAppended = await step(subOn, {
     agentId: 'sa4',
     agent: subagentAgent('sa4'),
@@ -452,7 +508,7 @@ console.log('the append-to-subagents switch')
 
   // Duplicate suppression follows the append decision per step: a subagent step
   // that skipped the append still gets its rule message.
-  const subRule = mount({ rules: [{ start: 1, every: 1, repeat: 1, text: 'RULE {{step}}' }], userAppend: true })
+  const subRule = mount({ rules: [{ start: 1, every: 1, repeat: 1, text: 'RULE {{step}}' }], userAppend: true, appendFirstOnly: false })
   const subRuleDecision = await step(subRule, {
     agentId: 'sa7',
     agent: subagentAgent('sa7'),
@@ -462,6 +518,161 @@ console.log('the append-to-subagents switch')
     assert.equal(subRuleDecision.messages.length, 2, 'the user message plus the rule message')
     assert.equal(subRuleDecision.messages[0].content.length, 1, 'the user message is untouched')
     assert.equal(subRuleDecision.messages[1].source.kind, KIND)
+  })
+}
+
+console.log('the append-to-first-message-only switch')
+{
+  // appendFirstOnly turns the append into a one-shot: only the first user
+  // message of a session carries the notice, every later user message stays
+  // untouched. The session boundary is the agent's own counter: when the
+  // agent is disposed and a step for it runs again, the append fires again.
+  const mounted = mount({ rules: [{ start: 1, every: 1, repeat: 2, text: 'RULE {{step}}' }], userAppend: true, appendFirstOnly: true })
+  const first = await step(mounted, { agentId: 'f1', messages: [userMessage('hello')] })
+  check('appendFirstOnly:true — the first user message gets the append', () => {
+    assert.equal(first.messages.length, 1, 'no rule message on the append step')
+    assert.equal(first.messages[0].content.length, 2)
+    assert.equal(first.messages[0].content[1].text, APPEND_TEXT)
+  })
+  const second = await step(mounted, { agentId: 'f1', messages: [userMessage('more')] })
+  check('appendFirstOnly:true — a later user message stays untouched', () => {
+    assert.equal(second.messages.length, 2, 'the rule message is still injected')
+    assert.equal(second.messages[0].content.length, 1, 'no append this time')
+    assert.equal(second.messages[0].content[0].text, 'more')
+    assert.equal(second.messages[1].source.kind, KIND)
+  })
+  const third = await step(mounted, { agentId: 'f1', messages: [userMessage('again')] })
+  check('appendFirstOnly:true — every later user message stays untouched', () => {
+    assert.equal(third.messages[0].content.length, 1)
+  })
+
+  const freshAgent = mount({ rules: [], userAppend: true, appendFirstOnly: true })
+  const agentFirst = await step(freshAgent, { agentId: 'f2', messages: [userMessage('brand new session')] })
+  check('appendFirstOnly:true — a new session gets the append on its first user message again', () => {
+    assert.equal(agentFirst.messages[0].content.length, 2)
+    assert.equal(agentFirst.messages[0].content[1].text, APPEND_TEXT)
+  })
+  const agentLater = await step(freshAgent, { agentId: 'f2', messages: [userMessage('and its second message')] })
+  check('appendFirstOnly:true — the new session later messages still do not', () => {
+    assert.equal(agentLater.messages[0].content.length, 1)
+  })
+
+  const firstOnlySub = mount({ rules: [], userAppend: true, appendFirstOnly: true })
+  const subUntouched = await step(firstOnlySub, {
+    agentId: 'f3',
+    agent: subagentAgent('f3'),
+    messages: [userMessage('delegate prompt')],
+  })
+  check('appendFirstOnly:true with appendSubagents:false — subagent steps are out of scope entirely', () => {
+    assert.equal(subUntouched.messages[0].content.length, 1)
+  })
+  const topStill = await step(firstOnlySub, { agentId: 'f4', messages: [userMessage('top first')] })
+  check('appendFirstOnly:true — the top-level agent is still in scope', () => {
+    assert.equal(topStill.messages[0].content.length, 2)
+  })
+
+  const already = mount({ rules: [], userAppend: true, appendFirstOnly: true })
+  const preEnded = await step(already, { agentId: 'f5', messages: [userMessage(`pre-ended${APPEND_TEXT}`)] })
+  check('appendFirstOnly:true — a first message already trailing the notice spends the one-shot without appending', () => {
+    assert.equal(preEnded.messages.length, 1)
+    assert.equal(preEnded.messages[0].content.length, 1)
+  })
+  const laterAfter = await step(already, { agentId: 'f5', messages: [userMessage('later')] })
+  check('appendFirstOnly:true — the one-shot spent by a pre-ended first message never appends to later messages', () => {
+    assert.equal(laterAfter.messages[0].content.length, 1)
+  })
+
+  const turnOnly = mount({ rules: [], userAppend: true, appendFirstOnly: true })
+  const noUserStep = await step(turnOnly, { agentId: 'f6' })
+  check('appendFirstOnly:true — a step with no user message does not spend the one-shot', () => {
+    assert.deepEqual(noUserStep.messages, [])
+  })
+  const afterGap = await step(turnOnly, { agentId: 'f6', messages: [userMessage('first user message')] })
+  check('appendFirstOnly:true — the first user message after such a step still gets the append', () => {
+    assert.equal(afterGap.messages[0].content.length, 2)
+    assert.equal(afterGap.messages[0].content[1].text, APPEND_TEXT)
+  })
+
+  const off = mount({ rules: [], userAppend: true, appendFirstOnly: false })
+  const offFirst = await step(off, { agentId: 'f7', messages: [userMessage('one')] })
+  const offSecond = await step(off, { agentId: 'f7', messages: [userMessage('two')] })
+  check('appendFirstOnly:false (default) — every user message gets the append, like before the switch', () => {
+    assert.equal(offFirst.messages[0].content.length, 2)
+    assert.equal(offSecond.messages[0].content.length, 2)
+    assert.equal(offSecond.messages[0].content[1].text, APPEND_TEXT)
+  })
+}
+
+console.log('the master switch')
+{
+  // `enabled: false` means the plugin is completely inert: no rule message, no
+  // append, and the step is not counted. Re-enabling must resume from the count
+  // it stopped at, not fire the notices the silent steps had already passed.
+  const mounted = mount({ rules: [{ start: 2, every: 1, repeat: 5, text: 'S{{step}}' }], userAppend: true, appendFirstOnly: false })
+  const stepOne = await step(mounted, { agentId: 'ms1' })
+  check('enabled by default — the plugin behaves as before', () => {
+    assert.deepEqual(stepOne.messages, [], 'step 1 precedes the rule start')
+  })
+
+  const off = await request(mounted, { method: 'POST', body: { enabled: false } })
+  check('POST enabled:false is accepted and persisted', () => {
+    assert.equal(off.status, 200)
+    assert.equal(off.body.enabled, false)
+    assert.equal(off.body.stored.enabled, false)
+    assert.equal(stored().enabled, false, 'and it is persisted')
+  })
+  const silentRule = await step(mounted, { agentId: 'ms2', messages: [userMessage()] })
+  check('enabled:false — no rule message and no append', () => {
+    assert.equal(silentRule.messages.length, 1, 'only the user message')
+    assert.equal(silentRule.messages[0].content.length, 1, 'the append did not run')
+    assert.equal(silentRule.messages[0].content[0].text, 'do the thing')
+  })
+
+  // Steps taken while the plugin is off must not consume the counter: a rule
+  // starting at step 2 would otherwise be hit by the very next step after the
+  // switch goes back on. Checked on a rule-only mount, because a step that
+  // appends to a user message deliberately suppresses that step's rule message.
+  const counter = mount({ rules: [{ start: 2, every: 1, repeat: 5, text: 'S{{step}}' }] })
+  // This mount inherits the store the earlier POST just wrote, so it starts
+  // switched off; turn it on explicitly before measuring the counter.
+  await request(counter, { method: 'POST', body: { enabled: true } })
+  await step(counter, { agentId: 'c1' })
+  await request(counter, { method: 'POST', body: { enabled: false } })
+  const frozen = await step(counter, { agentId: 'c1' })
+  const silent = await step(counter, { agentId: 'c1' })
+  check('enabled:false — no rule message even on a step that would have fired', () => {
+    assert.deepEqual(frozen.messages, [])
+    assert.deepEqual(silent.messages, [], 'step 3 would have fired; nothing came out')
+  })
+  await request(counter, { method: 'POST', body: { enabled: true } })
+  const resumes = await step(counter, { agentId: 'c1' })
+  check('the counter froze while off — re-enabling resumes at step 2, not step 4', () => {
+    assert.equal(resumes.messages.length, 1)
+    assert.equal(resumes.messages[0].content[0].text, 'S2')
+  })
+
+  const backOn = await request(mounted, { method: 'POST', body: { enabled: true } })
+  check('POST enabled:true switches it back on', () => {
+    assert.equal(backOn.status, 200)
+    assert.equal(backOn.body.enabled, true)
+  })
+  const afterOn = await step(mounted, { agentId: 'ms2', messages: [userMessage('later')] })
+  check('the append is back on after re-enabling', () => {
+    assert.equal(afterOn.messages.length, 1)
+    assert.equal(afterOn.messages[0].content.length, 2)
+    assert.equal(afterOn.messages[0].content[1].text, APPEND_TEXT)
+  })
+
+  const rejectedFlag = await request(mounted, { method: 'POST', body: { enabled: 'yes' } })
+  check('400 — a non-boolean enabled value is refused', () => {
+    assert.equal(rejectedFlag.status, 400)
+    assert.equal(rejectedFlag.body.error, 'enabled must be true or false')
+  })
+  const reset = await request(mounted, { method: 'DELETE' })
+  check('DELETE clears enabled back to the Config default (on)', () => {
+    assert.equal(reset.status, 200)
+    assert.equal(reset.body.enabled, true)
+    assert.equal(reset.body.stored.enabled, undefined)
   })
 }
 
@@ -491,7 +702,7 @@ console.log('step counting')
 
 console.log('HTTP surface')
 {
-  const mounted = mount({ rules: [{ start: 5, every: 5, repeat: 9, text: 'R {{step}}' }], userAppend: true })
+  const mounted = mount({ rules: [{ start: 5, every: 5, repeat: 9, text: 'R {{step}}' }], userAppend: true, appendFirstOnly: false })
   const initial = await request(mounted)
   check('GET answers the live rules, the Config defaults and an empty store', () => {
     assert.equal(initial.status, 200)
@@ -592,6 +803,13 @@ console.log('HTTP surface')
     assert.equal(subToggle.body.stored.appendSubagents, true)
     assert.equal(stored().appendSubagents, true, 'and it is persisted')
   })
+  const firstToggle = await request(remounted, { method: 'POST', body: { appendFirstOnly: true } })
+  check('a body holding nothing but appendFirstOnly is a valid patch', () => {
+    assert.equal(firstToggle.status, 200)
+    assert.equal(firstToggle.body.appendFirstOnly, true)
+    assert.equal(firstToggle.body.stored.appendFirstOnly, true)
+    assert.equal(stored().appendFirstOnly, true, 'and it is persisted')
+  })
 
   const empty = await request(remounted, { method: 'POST', body: {} })
   check('400 on an empty patch', () => {
@@ -630,6 +848,7 @@ console.log('invalid input is rejected')
     ['the second row is named in the error', { rules: [{ start: 1, every: 1, repeat: 1, text: 'ok' }, { start: 1, every: 1, repeat: 1001, text: 'ok' }] }, 'rules[1]: repeat must be an integer between 0 and 1000 (0 = unlimited)'],
     ['non-boolean userAppend', { userAppend: 'yes' }, 'userAppend must be true or false'],
     ['non-boolean appendSubagents', { appendSubagents: 'yes' }, 'appendSubagents must be true or false'],
+      ['non-boolean appendFirstOnly', { appendFirstOnly: 'yes' }, 'appendFirstOnly must be true or false'],
     ['empty appendText', { appendText: '' }, 'appendText must be a non-empty string of at most 1000 characters'],
     ['appendText above 1000 code units', { appendText: 'x'.repeat(1001) }, 'appendText must be a non-empty string of at most 1000 characters'],
     ['non-string appendText', { appendText: 42 }, 'appendText must be a non-empty string of at most 1000 characters'],

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Context insertion",
-    "description": "Insert configurable context into the agent's own context on chosen executed steps (from step X, every Y steps, Z times, with {{step}} replaced by the current step number) and optionally append a sentence to every user message (with a separate switch for messages sent to subagents); all configured on the Settings page."
+    "description": "Insert configurable context into the agent's own context on chosen executed steps (from step X, every Y steps, Z times, with {{step}} replaced by the current step number) and optionally append a sentence to user messages (by default only to the first user message of the conversation, with a separate switch for messages sent to subagents), plus a master switch that silences the whole plugin; all configured on the Settings page."
   }
 }

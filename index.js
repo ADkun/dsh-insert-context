@@ -43,6 +43,26 @@ const DEFAULT_USER_APPEND = false
  * delegated prompt. Off by default: only the user's own messages get it. */
 const DEFAULT_APPEND_SUBAGENTS = false
 
+/**
+ * When on, the append is a one-shot for the conversation: only the first user
+ * message of a session carries it, every later user message stays untouched.
+ * "Session" is the same boundary the per-agent step counter already tracks
+ * (`agent/disposed` restarts the count), so a fresh session gets the append on
+ * its first user message again. On by default: the notice is a one-off
+ * instruction for the whole conversation, so repeating it on every message only
+ * spends tokens. Turning it off restores the append-to-every-message behaviour.
+ */
+const DEFAULT_APPEND_FIRST_ONLY = true
+
+/**
+ * The plugin's master switch. Off means the plugin is *fully* inert: no append,
+ * no rule injection, and steps are not even counted — the per-agent counters
+ * freeze where they were, so switching it back on resumes from that count
+ * instead of jumping. On by default: the switch exists to silence the plugin
+ * temporarily, not to ship it disabled.
+ */
+const DEFAULT_ENABLED = true
+
 /** Producer tag recorded on every injected message (unknown kinds fall through by contract). */
 const SOURCE_KIND = 'insert-context'
 
@@ -53,24 +73,19 @@ const MAX_BODY_BYTES = 64 * 1024
 
 /**
  * The one rule shipped as the built-in default: from step 10, every 10 steps,
- * unlimited (the user removed the second "wrap-up" rule and asked for a nudge,
- * not an order). Ten steps in, say the step number, hand over the user's
- * impatience, and attach the one exception that matters — unfinished work
- * outranks the hurry. That clause is deliberately *conditional on the agent's
- * own state* ("如果还有没做完的事情") and names an action, where the older wording
- * named a virtue ("别牺牲回答质量") with no trigger and no action to take: read
- * right after "用户催你搞快点啦", a model resolved that tension by wrapping up
- * early — the failure this notice exists to prevent. The pressure is put on
- * the work, never on the user: "先别理用户" would read as licence to defer a
- * live instruction, because this line lands after the user's own message of
- * that step. Older/longer wordings live in the README as examples only.
+ * unlimited. The text is deliberately one short sentence — say the step number,
+ * point at convergence, stop. It carries no order, no exception clause and no
+ * compression-time instruction: a reminder is reread on every hit, so length is
+ * paid every ten steps while shaping the reply more than it helps. The user
+ * replaced the older "用户催你搞快点啦…" nudge with this wording; longer variants
+ * live in the README as copy-paste examples only.
  */
 const DEFAULT_RULES = Object.freeze([
   Object.freeze({
     start: 10,
     every: 10,
     repeat: 0,
-    text: '现在是第 {{step}} 步，用户催你搞快点啦！但是如果还有没做完的事情，就把事做完再说吧~',
+    text: '现在是第 {{step}} 步，注意任务收敛进度。',
   }),
 ])
 
@@ -269,8 +284,12 @@ function normalizeSettings(raw, logger) {
   }
   const userAppend = validFlag(raw?.userAppend)
   if (userAppend !== undefined) settings.userAppend = userAppend
+  const enabled = validFlag(raw?.enabled)
+  if (enabled !== undefined) settings.enabled = enabled
   const appendSubagents = validFlag(raw?.appendSubagents)
   if (appendSubagents !== undefined) settings.appendSubagents = appendSubagents
+  const appendFirstOnly = validFlag(raw?.appendFirstOnly)
+  if (appendFirstOnly !== undefined) settings.appendFirstOnly = appendFirstOnly
   const appendText = validText(raw?.appendText)
   if (appendText !== undefined) {
     warnUnknownPlaceholders(appendText, logger, 'appendText')
@@ -432,13 +451,25 @@ function withNotice(message, text) {
   return deepFreeze({ ...message, content: [...content, { type: 'text', text }] })
 }
 
+/**
+ * 追加去重：消息的最后一个文本块若已经以 `text` 结尾（尾部完全匹配），说明要追加的
+ * 文案已经在尾部了，再追加一遍就会重复。只看最后一块——它才是消息的“尾”。
+ */
+function alreadyEndsWith(message, text) {
+  const content = Array.isArray(message?.content) ? message.content : []
+  const last = content[content.length - 1]
+  return last?.type === 'text' && typeof last.text === 'string' && last.text.endsWith(text)
+}
+
 export function apply(ctx, config = {}) {
   /** Defaults from the plugin row's Config; the Settings page overrides them. */
   const configuredRules = usableRules(config.rules) ? config.rules.map((rule) => validRule(rule).rule) : defaultRules()
   const configured = Object.freeze({
     rules: configuredRules,
+    enabled: validFlag(config.enabled) ?? DEFAULT_ENABLED,
     userAppend: validFlag(config.userAppend) ?? DEFAULT_USER_APPEND,
     appendSubagents: validFlag(config.appendSubagents) ?? DEFAULT_APPEND_SUBAGENTS,
+    appendFirstOnly: validFlag(config.appendFirstOnly) ?? DEFAULT_APPEND_FIRST_ONLY,
     appendText: validText(config.appendText) ?? DEFAULT_APPEND_TEXT,
   })
   for (const rule of configuredRules) warnUnknownPlaceholders(rule.text, ctx.logger, 'a configured rule')
@@ -451,18 +482,29 @@ export function apply(ctx, config = {}) {
 
   /** Live behaviour: the saved choice when there is one, else the row's Config. */
   let rules = Array.isArray(stored.rules) ? stored.rules : configured.rules
+  let enabled = stored.enabled ?? configured.enabled
   let userAppend = stored.userAppend ?? configured.userAppend
   let appendSubagents = stored.appendSubagents ?? configured.appendSubagents
+  let appendFirstOnly = stored.appendFirstOnly ?? configured.appendFirstOnly
   let appendText = stored.appendText ?? configured.appendText
 
   /** Per-agent step counter, keyed by agent id. */
   const steps = new Map()
 
+  /**
+   * Per-agent "the append already landed on this session's first user message"
+   * flag, keyed by agent id. Reset with the counter when the agent is disposed,
+   * so a fresh session gets the append on its first user message again.
+   */
+  const appendedFirst = new Map()
+
   const describe = () => ({
     ok: true,
+    enabled,
     rules,
     userAppend,
     appendSubagents,
+    appendFirstOnly,
     appendText,
     bounds: {
       start: [MIN_START, MAX_START],
@@ -478,6 +520,10 @@ export function apply(ctx, config = {}) {
 
   ctx.on('agent/pre-step', async (payload, next) => {
     const decision = await next()
+    // The master switch: inert means inert — no append, no rule message, and the
+    // step is not counted either, so re-enabling resumes the schedule where it
+    // stopped instead of firing every rule the silent steps had already passed.
+    if (!enabled) return decision
     if (decision.kind !== 'enter') return decision
 
     const claimed = decision.messages
@@ -488,16 +534,34 @@ export function apply(ctx, config = {}) {
     // "user" messages are prompts its dispatcher sent, so they only get the
     // append when the subagent switch (`appendSubagents`) is on.
     let messages = claimed
-    let appended = false
-    if (userAppend && (appendSubagents || !isSubagentStep(payload.agent))) {
-      for (const message of claimed) {
-        if (isUserMessage(message)) {
-          appended = true
-          break
-        }
-      }
-      if (appended) {
-        messages = claimed.map((message) => (isUserMessage(message) ? withNotice(message, appendText) : message))
+    let appendedThisStep = false
+    const sessionScope = userAppend && (appendSubagents || !isSubagentStep(payload.agent))
+    if (sessionScope) {
+      // appendFirstOnly turns the append into a one-shot: only the first user
+      // message of this session carries the notice, and only once. A step whose
+      // user messages are already trailing the notice still counts as "first
+      // seen", so a remount mid-session never appends to a later message either.
+      const firstSeen = appendedFirst.get(payload.agent.id) ?? false
+      const pending = claimed.filter(
+        (message) =>
+          isUserMessage(message) && !alreadyEndsWith(message, appendText) && (appendFirstOnly ? !firstSeen : true),
+      )
+      if (pending.length > 0) {
+        appendedThisStep = true
+        messages = claimed.map((message) =>
+          isUserMessage(message) && !alreadyEndsWith(message, appendText) && (appendFirstOnly ? !firstSeen : true)
+            ? withNotice(message, appendText)
+            : message,
+        )
+        if (appendFirstOnly) appendedFirst.set(payload.agent.id, true)
+      } else if (appendFirstOnly) {
+        // No message was appended this step, but the step did carry user
+        // messages and none of them needed the append (already trailing the
+        // notice, or the first one was seen before): the one-shot is spent
+        // either way — later steps never append. A step with no user message
+        // at all (a pure model turn) does not spend it.
+        const hasUserMessage = claimed.some(isUserMessage)
+        if (hasUserMessage) appendedFirst.set(payload.agent.id, true)
       }
     }
 
@@ -510,7 +574,7 @@ export function apply(ctx, config = {}) {
     // order the rules are listed, so a step that trips several rules still adds
     // one message rather than several.
     const hits = rules.filter((rule) => ruleHits(rule, count))
-    if (hits.length > 0 && !appended) {
+    if (hits.length > 0 && !appendedThisStep) {
       const text = hits.map((rule) => fillStep(rule.text, count)).join('\n')
       ctx.logger?.debug?.(`insert-context: injected into step ${count} of turn ${payload.turn} (${hits.length} rule(s))`)
       return { ...decision, messages: [...messages, createNoticeMessage(text)] }
@@ -521,13 +585,16 @@ export function apply(ctx, config = {}) {
 
   ctx.on('agent/disposed', (payload) => {
     steps.delete(payload.agent.id)
+    appendedFirst.delete(payload.agent.id)
   })
 
   const applySettings = (next) => {
     stored = next
     rules = Array.isArray(next.rules) ? next.rules : configured.rules
+    enabled = next.enabled ?? configured.enabled
     userAppend = next.userAppend ?? configured.userAppend
     appendSubagents = next.appendSubagents ?? configured.appendSubagents
+    appendFirstOnly = next.appendFirstOnly ?? configured.appendFirstOnly
     appendText = next.appendText ?? configured.appendText
   }
 
@@ -595,6 +662,12 @@ export function apply(ctx, config = {}) {
                 }
               }
             }
+            if ('enabled' in body) {
+              touched = true
+              const value = validFlag(body.enabled)
+              if (value === undefined) error = 'enabled must be true or false'
+              else next.enabled = value
+            }
             if ('userAppend' in body) {
               touched = true
               const value = validFlag(body.userAppend)
@@ -606,6 +679,12 @@ export function apply(ctx, config = {}) {
               const value = validFlag(body.appendSubagents)
               if (value === undefined) error = 'appendSubagents must be true or false'
               else next.appendSubagents = value
+            }
+            if ('appendFirstOnly' in body) {
+              touched = true
+              const value = validFlag(body.appendFirstOnly)
+              if (value === undefined) error = 'appendFirstOnly must be true or false'
+              else next.appendFirstOnly = value
             }
             if ('appendText' in body) {
               touched = true
@@ -629,7 +708,7 @@ export function apply(ctx, config = {}) {
             }
             applySettings(next)
             ctx.logger?.info?.(
-              `insert-context: ${rules.length} rule(s), user-message append ${userAppend ? 'on' : 'off'}${userAppend ? ` (subagents ${appendSubagents ? 'included' : 'skipped'})` : ''}, append text of ${appendText.length} character(s)`,
+              `insert-context: ${enabled ? 'on' : 'OFF'}, ${rules.length} rule(s), user-message append ${userAppend ? 'on' : 'off'}${userAppend ? ` (${appendFirstOnly ? 'first message only' : `every message`}${appendSubagents ? ', subagents included' : ', subagents skipped'})` : ''}, append text of ${appendText.length} character(s)`,
             )
             return send(200, describe())
           },
